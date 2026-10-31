@@ -284,7 +284,7 @@ def main():
     c_compare = bar_chart(
         "Conway's Life compared with published results",
         "Cell updates per second. Published numbers are the authors' own, on their hardware and grid sizes. Log scale.",
-        cmp_rows, id_="compare",
+        cmp_rows, id_="compare", label_w=390,
     )
 
     # API
