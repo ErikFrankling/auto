@@ -1,0 +1,12 @@
+[package]
+name = "auto-cpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["threads"]
+threads = ["dep:rayon"]
+
+[dependencies]
+rayon = { workspace = true, optional = true }

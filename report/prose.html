@@ -1,0 +1,83 @@
+<h1>auto: how fast can cellular automata go on one gaming GPU?</h1>
+<p class="sub">Measured on 2026-10-31 on an AMD RX 7900 XT (20 GB, Mesa RADV) and a Ryzen 7 7800X3D, with a desktop running on the same GPU. <a href="app/?a=lenia">Run it in your browser</a> (needs WebGPU) or read <a href="https://github.com/ErikFrankling/auto">the code</a>.</p>
+{{HEROES}}
+<p><b>The short version.</b> Conway's Game of Life runs at about 5 trillion cell updates per second, and stays there from a few hundred million cells up to 34 billion. WebGPU is not the bottleneck: wgpu matched hand-written Vulkan at large sizes, Chrome matched native, and Firefox was 4% to 17% behind. Rust and WebGPU is a good choice, and the same code runs as a native program and a web page.</p>
+<p>The best published result on nearly the same hardware is 8.9 trillion, on the faster 7900 XTX, so there is probably room left.</p>
+
+<h2>Videos</h2>
+<p>All 16 automata, running on this engine. Most are checked against a plain CPU version of their rule or against what they must conserve. Forest fire, SmoothLife and MNCA have no rule test of their own yet, though the FFT path they share with Lenia does.</p>
+{{VIDEOS}}
+
+<h2>Conway's Game of Life</h2>
+<h3>What makes it fast</h3>
+<p>The textbook version stores one number per cell and reads 8 neighbours. Packing 32 cells into each word and adding the neighbours with bitwise logic updates 32 cells at once, and is about 50 times faster at 16384x16384.</p>
+<p>That stops scaling when the grid outgrows GPU cache, because the limit becomes memory. The fix is <b>temporal blocking</b>: copy a tall column into fast on-chip memory, run 16 generations there, and write the result back once. Memory traffic drops and throughput stays flat as the world grows.</p>
+{{C_KERNELS}}
+<p>My first blocking design was about 4 times slower than no blocking at all. The design that works came from reading <a href="https://github.com/binary-banter/fast-game-of-life">Dijkstra and Brouwer's OpenCL kernel</a>: one tall column per workgroup, kept in two overlapping windows, not a wide tile.</p>
+{{C_BLOCKING}}
+<h3>Scale</h3>
+{{C_GENS}}
+{{C_FLAT}}
+<p>Small grids run below peak because the GPU spends its time starting dispatches. Above about 100 million cells, memory is the only thing that changes, and blocking removes most of that.</p>
+<h3>Compared with everyone else</h3>
+{{C_COMPARE}}
+<p class="note">These aren't controlled comparisons. Each uses its own hardware, grid size and method. On the same grid sizes, published grid details are sometimes incomplete; see <a href="https://github.com/ErikFrankling/auto/blob/main/research/notes/fastest-life.md">the notes</a>. A trillion updates per second is a rate, not a world of a trillion cells.</p>
+
+<h2>A trillion cells</h2>
+<p><b>A dense trillion cells doesn't fit on this GPU.</b> At 1 bit per cell, with two copies of the world, it needs 250 GB against the card's 20 GB. The largest grid measured is 34 billion cells at 143 generations per second, using 8.6 GB. The same method should reach about 100 billion cells with all 20 GB free. That is an estimate, not a measurement.</p>
+<p>Past that there are two ways on, and they mean different things:</p>
+<ul>
+<li><b>Hashlife</b> simulates patterns much bigger than a trillion cells, if they repeat. It stores identical squares once and remembers their futures, so it is only useful for structured patterns. On a random soup it would be slower than a dense grid. Results from this repo's implementation, on the CPU:</li>
+</ul>
+{{HASH_TABLE}}
+<ul>
+<li><b>Dense, spread over machines or disk.</b> The world is split up and swaps edges between steps. It wasn't built here. At today's throughput, a 250 GB GPU would do about 5 generations per second of a dense trillion cells.</li>
+</ul>
+
+<h2>How much does WebGPU cost?</h2>
+<p>You guessed that 20% would be fine and an order of magnitude wouldn't. <b>Measured, it costs nothing you can detect in Chrome or native wgpu, and 4% to 17% in Firefox, on grids of 16 million cells and up.</b> Every row runs the same shader.</p>
+<p>Two cautions. Chrome coming out slightly ahead of native may only reflect its longer test batches, so read it as equal, not faster. And on small grids wgpu looks well ahead of raw Vulkan, but my raw Vulkan runner does extra CPU work per dispatch and isn't tuned for that case, so these numbers don't show what the best possible Vulkan could do there.</p>
+{{C_API}}
+{{API_TABLE}}
+<p>What the browser does cost is elsewhere:</p>
+<ul>
+<li><b>Getting it running.</b> On Linux neither browser gives WebGPU on this card by default. Firefox needs a preference set. Chrome needs flags and a real window: its headless mode fell back to a software renderer about 1000 times slower. On Windows and Mac it should need less setup, which wasn't tested here.</li>
+<li><b>Bounds checks barely matter.</b> Turning them off changed almost nothing, which goes against the common worry.</li>
+<li><b>Limits.</b> wgpu caps a buffer at 2 GB on this setup, while Chrome offered 4 GB. Sharding across buffers works around it, and worked here up to 34 billion cells. 64-bit integers are native only, and gave no clear gain anyway.</li>
+</ul>
+
+<h2>The other automata</h2>
+<p>This is what the extensible core is for. Each family breaks a different assumption, and none needed special support in the engine:</p>
+<ul>
+<li><b>Bit planes:</b> Life, Rule 30, Rule 110, Brian's Brain, Wireworld. The fastest family by far, and multi-state rules keep most of the speed.</li>
+<li><b>One word per cell:</b> cyclic, Hodgepodge, ants, forest fire, sandpile. New rules take only a few lines, at about 90 billion updates per second.</li>
+<li><b>Block partitioning:</b> falling sand updates in place, on a block grid that shifts every tick.</li>
+<li><b>Floats:</b> Gray-Scott.</li>
+<li><b>Big neighbourhoods by FFT:</b> Lenia, SmoothLife and MNCA. A step costs the same at any radius, but about 25 passes per step make them hundreds of times slower than bit rules.</li>
+<li><b>Agents:</b> Physarum scatters particles into a grid with atomic operations. It is the closest to what a neural particle sim would need.</li>
+</ul>
+{{C_AUTO}}
+{{C_AUTO_SCALE}}
+{{AUTO_TABLE}}
+<p>FFT automata and Physarum drop at big sizes, more than bit rules do, because their passes touch memory far more often. Temporal blocking only helps rules with small neighbourhoods.</p>
+
+<h2>On the CPU</h2>
+{{C_CPU}}
+<p>The best CPU result is about 350 billion updates per second, 14 times less than the GPU, using 4 of the 16 threads the agent sandbox allows. So all 16 threads would do more than this. AVX2 and AVX-512 are close while the grid fits in cache, and AVX-512 pulls ahead on bigger grids. Nothing here uses temporal blocking on the CPU, which would help on the largest grids.</p>
+<details><summary>The same WGSL shaders on the CPU through llvmpipe (software Vulkan)</summary>{{LLVM}}</details>
+<details><summary>The integrated GPU on the 7800X3D</summary>{{IGPU}}</details>
+
+<h2>What about neural networks?</h2>
+<p>A separate test: millions of independent RNNs, each with its own weights, to see what a brain costs. <b>WebGPU handles it.</b> Rewriting the kernel with 4x4 weight blocks made the same network over 10 times faster, far more than any API change could. The limits are VRAM and memory bandwidth, which CUDA wouldn't change even if this card could run it.</p>
+{{C_BRAINS}}
+<details><summary>All the numbers</summary>{{BRAIN_TABLE}}</details>
+<p>The full analysis, including a comparison of your diploma project with Fraser Price's sim, is in <a href="https://github.com/ErikFrankling/auto/blob/main/research/neural-evolution.md">research/neural-evolution.md</a>.</p>
+
+<h2>What to keep in mind</h2>
+<ul>
+<li><b>This GPU also runs the desktop.</b> Other programs used it during these runs, so treat small differences as noise. Runs repeat within a few percent.</li>
+<li><b>The largest grids stutter the screen.</b> At 4 billion cells and up, each step holds the GPU for 50 to 110 ms. The bench and record tools now check free VRAM and refuse runs that would hold the card too long, unless forced.</li>
+<li><b>Density matters little here.</b> Bitwise kernels do the same work on dead and live cells, so soup density hardly changes the speed. The Life runs start at 35% density.</li>
+<li><b>All numbers are the sim alone.</b> Rendering and video encoding are separate, and recording runs more slowly.</li>
+<li><b>Correct first.</b> The test suite compares every Life kernel and most other automata with a CPU version, and an independent review caught more problems, including invalid Rule 30 and Rule 110 numbers. Those are fixed and re-measured here.</li>
+</ul>

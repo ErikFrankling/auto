@@ -1,0 +1,16 @@
+[package]
+name = "auto-vk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+auto-core = { path = "../auto-core" }
+ash = "0.38"
+naga = { version = "30", features = ["wgsl-in", "spv-out"] }
+bytemuck.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+pollster.workspace = true
+wgpu.workspace = true

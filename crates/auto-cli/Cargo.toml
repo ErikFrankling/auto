@@ -1,0 +1,20 @@
+[package]
+name = "auto-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "auto"
+path = "src/main.rs"
+
+[dependencies]
+auto-core = { path = "../auto-core" }
+auto-cpu = { path = "../auto-cpu" }
+rayon.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+pollster.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true

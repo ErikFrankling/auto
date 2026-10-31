@@ -1,0 +1,13 @@
+target/
+.direnv/
+*.mp4
+dist/
+__pycache__/
+research/fraser-price/.diploma.txt
+videos/
+report/index.html
+report/charts/
+site/
+research/fraser-price/post.mp4
+report/png/
+research/fraser-price/sheet1.png

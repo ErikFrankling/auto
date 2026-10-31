@@ -1,0 +1,20 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  native-and-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install a software Vulkan driver
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libvulkan1 libwayland-dev libxkbcommon-dev
+      - name: Build every native crate
+        run: cargo build --release --workspace --exclude auto-web
+      - name: Both targets stay buildable
+        run: cargo check --release -p auto-web --target wasm32-unknown-unknown
+      - name: Tests, on lavapipe
+        run: cargo test --release -p auto-core -p auto-cpu
