@@ -87,9 +87,17 @@ Plan for discussion, smallest useful version first:
 4. **Measure from day one:** births and deaths by cause, lineage IDs, genome hashes, and actual use of each action. Keep controls with random and frozen genomes. Without these you can't tell evolution from pretty noise.
 5. **First real question:** one connected world or islands with some migration, at the same total compute? It tests the refuge idea directly, and it speaks to the extinctions in your diploma.
 
-## Decisions for you
+## Decisions
 
-- **Fixed RNN or NEAT?** I would start with a fixed RNN. It fits the GPU directly. NEAT was the heart of your diploma and growing topology is arguably the more interesting idea, but on a GPU it needs sparse genomes and is a project of its own.
+Decided by Erik on 2026-10-31:
+
+- **Fixed RNN, not NEAT.** We focus on what scales well on a GPU.
+- **No fitness function.** Energy alone decides who survives and how evolution goes.
+
+The toy in [toy/](toy/) tests the world rules on a small scale.
+
+Still open:
+
 - **Natural selection only, or an outer search over world settings?** I would start with natural selection only. Sakana-style search over physics is a good later step, since physics decides so much.
 - **Bodies from bonding?** It is the most striking thing in Fraser's videos and the hardest to run on a GPU. I would do it third, after a stable ecology.
 - **What counts as success?** Fraser's bar is continued novelty from one fixed config. Picking the measure before running will save arguing with pretty videos later.
