@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>auto: very fast cellular automata</title>
+
+<script type="module">
+import init, * as bindings from './auto-web-66124f7031e6f886.js';
+const wasm = await init({ module_or_path: './auto-web-66124f7031e6f886_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script>
+<style>
+  html, body { margin: 0; height: 100%; background: #070810; color: #e8e8f0; font: 14px/1.4 ui-sans-serif, system-ui, sans-serif; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #bar { position: fixed; left: 12px; top: 12px; right: 12px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select, button { background: #171a28e6; color: inherit; border: 1px solid #39405c; border-radius: 6px; padding: 6px 10px; font: inherit; }
+  button:hover, select:hover { border-color: #7a84b8; }
+  #about, #stats { background: #070810cc; border-radius: 6px; padding: 3px 8px; width: fit-content; }
+  #about { position: fixed; left: 12px; bottom: 40px; max-width: 70ch; }
+  #stats { position: fixed; left: 12px; bottom: 12px; font-size: 12px; }
+  #error { position: fixed; inset: 0; display: none; place-items: center; text-align: center; padding: 24px; }
+</style>
+<link rel="modulepreload" href="./auto-web-66124f7031e6f886.js" crossorigin="anonymous" integrity="sha384-YnVE3gOTuxSEoC51KYmwv/DQIE+5up2F8vxpcwhIki17kx3Pm3j1sV1bHNO5SJG5"><link rel="preload" href="./auto-web-66124f7031e6f886_bg.wasm" crossorigin="anonymous" integrity="sha384-RybUFR3oIkv6QnxJ6CA0civsabhSq+Llp1n292cX0UA54Aw+I81OHzw/xYWXSzZm" as="fetch" type="application/wasm"></head>
+<body>
+<canvas id="c"></canvas>
+<div id="bar">
+  <select id="pick" aria-label="Automaton"></select>
+  <button data-c="pause">Pause</button>
+  <button data-c="reseed">New seed</button>
+  <button data-c="slower">Slower</button>
+  <button data-c="faster">Faster</button>
+</div>
+<div id="about"></div>
+<div id="stats"></div>
+<div id="error"></div>
+<script type="module">
+  await new Promise((r) => window.wasmBindings ? r() : addEventListener('TrunkApplicationStarted', r));
+  const wasm = window.wasmBindings;
+  const params = new URLSearchParams(location.search);
+  const say = (m) => { const e = document.getElementById('error'); e.style.display = 'grid'; e.textContent = m; };
+  if (!navigator.gpu) say('This page needs WebGPU. Try a recent Chrome or Edge.');
+  else if (params.get('bench')) {
+    const [w, h] = (params.get('size') || '1024x1024').split('x').map(Number);
+    let row;
+    try {
+      row = JSON.parse(await wasm.bench(params.get('bench'), w, h, Number(params.get('seconds') || 3)));
+    } catch (e) { row = { error: String(e) }; }
+    const a = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    row.browser = navigator.userAgent;
+    row.browser_adapter = a && { vendor: a.info.vendor, architecture: a.info.architecture, device: a.info.device, description: a.info.description, fallback: a.info.isFallbackAdapter };
+    window.__bench = JSON.stringify(row);
+    if (params.get('report')) await fetch('/report', { method: 'POST', body: window.__bench });
+    document.title = 'done';
+  } else {
+    const list = JSON.parse(wasm.automata_json());
+    const pick = document.getElementById('pick');
+    const about = document.getElementById('about');
+    for (const a of list) pick.add(new Option(a.name, a.id));
+    const first = params.get('a') || 'lenia';
+    pick.value = first;
+    const blurb = () => { about.textContent = list.find(a => a.id === pick.value).blurb; };
+    blurb();
+    const canvas = document.getElementById('c');
+    const fit = () => {
+      const r = devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(innerWidth * r));
+      canvas.height = Math.max(1, Math.floor(innerHeight * r));
+      wasm.resize(canvas.width, canvas.height);
+    };
+    canvas.width = innerWidth; canvas.height = innerHeight;
+    try {
+      await wasm.start(canvas, first);
+    } catch (e) { say('Could not start WebGPU: ' + e); throw e; }
+    fit();
+    addEventListener('resize', fit);
+    pick.onchange = () => { wasm.select(pick.value); blurb(); };
+    for (const b of document.querySelectorAll('button[data-c]')) b.onclick = () => wasm.control(b.dataset.c);
+    canvas.addEventListener('wheel', (e) => { e.preventDefault(); wasm.zoom(e.deltaY > 0 ? 1.15 : 0.87); }, { passive: false });
+    const stats = document.getElementById('stats');
+    let n = 0;
+    const loop = () => {
+      wasm.frame();
+      if (n++ % 15 === 0) { stats.textContent = wasm.stats(); window.__stats = stats.textContent; }
+      if (params.get('report') && n === 120) {
+        fetch('/report', { method: 'POST', body: JSON.stringify({ stats: stats.textContent, image: canvas.toDataURL('image/png') }) });
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+</script>
+</body>
+</html>
