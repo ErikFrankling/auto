@@ -165,7 +165,11 @@ impl Recorder {
                     "-threads",
                     &opts.threads.to_string(),
                     "-crf",
-                    "22",
+                    "23",
+                    "-maxrate",
+                    "30M",
+                    "-bufsize",
+                    "60M",
                     "-movflags",
                     "+faststart",
                 ]);
