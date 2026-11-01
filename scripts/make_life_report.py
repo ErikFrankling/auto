@@ -342,6 +342,15 @@ def section_scale():
 <p>The world's physics isn't exactly the same at every size. A 512² world has about 4 season regions, and 4096² has 256, so a big world always has somewhere in good season. And 8192² is a warning: the memory limit at the time forced the sun down 80% so 2.6 million cells would fit, and cells ended up with 0.6 neighbours on average. Predators vanished. Size alone doesn't make a world richer: density matters too.</p>"""
 
 
+def section_roomy():
+    _, rows = load_log(EXP / "base-roomy/512-seed2.jsonl")
+    if not rows:
+        return ""
+    l = rows[-1]
+    w = l.get("world") or {}
+    return f"""<p><b>Does the memory limit shape seed 2?</b> The same seed with twice the room reached {l['cells']:,} cells at tick {l['tick']:,}, with {pct(w.get('budget', {}).get('rest'))} of spending on rest, {pct(other_share(l))} of energy from other cells and {l.get('births_no_slot', 0):,} births blocked in its last stretch.</p>"""
+
+
 def section_time(worlds):
     charts = []
     def series(fn):
@@ -465,10 +474,10 @@ def section_behaviours(worlds, ana, removal):
         ("Biting", "Energy from biting", each(lambda r: r["world"]["lives_on"]["bite"], p0), "A real way to live, in some worlds"),
         ("Being bitten", "Share of deaths", each(bitten_share, p0), "Up to the main cause of death"),
         ("Scavenging", "Energy from meat", each(lambda r: r["world"]["lives_on"]["meat"], p0), "Corpses feed real groups"),
-        ("Cannibalism", "Bites on similar genomes", each(lambda r: r["world"]["bites_on_similar"], p0), "High in some worlds, so relatives aren't spared by default"),
+        ("Cannibalism", "Bites on similar genomes", each(lambda r: r["world"]["bites_on_similar"], p0), "About half of bites land on similar genomes, so relatives aren't spared"),
         ("Moving", "Share of ticks", each(lambda r: r["world"]["moving"], p0), "Splits nomads from settlers"),
-        ("Following food", "Heading vs food gradient, +1 is straight at it", each(lambda r: r["world"]["heads_to_food"]), "Strong in all but the still worlds"),
-        ("Avoiding bodies", "Heading vs bodies, negative is away", each(lambda r: r["world"]["heads_to_bigger"]), "Cells steer away from others"),
+        ("Following food", "Heading vs food gradient, +1 is straight at it", each(lambda r: r["world"]["heads_to_food"]), "Moving cells head towards food"),
+        ("Avoiding bodies", "Heading vs bodies, negative is away", each(lambda r: r["world"]["heads_to_bigger"]), "Mild, and only wanderers move enough to measure it"),
         ("Fleeing or chasing", "Heading towards smaller minus towards bigger", each(lambda r: r["world"]["heads_to_smaller"] - r["world"]["heads_to_bigger"]), "Near zero, so size doesn't change the response. Not seen yet"),
         ("Resting", "Budget share", each(lambda r: r["world"]["budget"]["rest"], p0), "Common, sometimes the main habit"),
         ("Colonies", "Cells in touching groups over 256", from_ana(big_colonies, p0), "Real, with sharp borders"),
@@ -650,8 +659,12 @@ def findings(worlds, ana, is_v2):
     for n, k in separated_species(ana)[:2]:
         items.append(f"<b>A species with its own way of life.</b> In seed {n}, a whole genome cloud is almost entirely {KIND_NAMES[k].lower()}, set apart from the other groups. See the genome map below.")
     items.append("<b>Colonies hold territory.</b> Different genomes keep separate ground with sharp borders, and you can see it directly in the genome-coloured views.")
-    items.append("<b>Scared hasn't evolved.</b> Cells steer away from bodies in general, but treat bigger and smaller ones about the same, so there's no real fleeing or chasing yet. Hunters mostly sit and bite what's next to them.")
+    items.append("<b>Scared hasn't evolved.</b> Wanderers steer slightly away from other bodies, but treat bigger and smaller ones about the same, and nothing shows real fleeing or chasing yet. Hunters mostly sit and bite what's next to them.")
     items.append("<b>Scent, gifts and heat are barely used.</b> Each takes under about 1% of spending in baseline, and scent following is weak. Giving cells a feature doesn't mean evolution picks it up.")
+    for n, _, rows in worlds:
+        blocked = sum(r.get("births_no_slot", 0) for r in rows)
+        if blocked > 1000:
+            items.append(f"<b>{n} ran out of memory for new cells.</b> It sat at the limit of {fmt_num(rows[-1]['cells'])} cells, with {blocked / 1e6:.0f} million births blocked. Its resting habit may partly be a response to having no room to breed, so don't read it as a free choice. A rerun with twice the room is queued.")
     items.append("<b>Nothing here beats baseline clearly yet.</b> Several experiments are still waiting for the GPU, so no rule can be called a winner.")
     return "<ul>" + "".join(f"<li>{i}</li>" for i in items) + "</ul>"
 
@@ -718,12 +731,14 @@ def main():
 {section_behaviours(worlds, ana, None)}
 {section_voice(ana)}
 {section_removal()}
+{section_roomy()}
 {section_species(worlds, ana)}
 {section_time(worlds)}
 {section_experiments(worlds)}
 {section_scale()}
 <h2 id="limits">Limits</h2>
 <ul>
+<li><b>Memory limit.</b> Experiments and baselines at 512² can hold cells on half the squares. Worlds that fill up hit that limit, and it may shape what evolves in them.</li>
 <li><b>Few runs.</b> Three baseline seeds, and two or three for most experiments. Worlds differ a lot by chance, so treat everything here as leads.</li>
 <li><b>Giant worlds are young.</b> The 4096² world ran about 16,000 ticks from copied tiles, so the regular pattern you can see comes from that. It isn't long enough for much new evolution.</li>
 <li><b>512² isn't the same physics as 4096².</b> Small worlds have fewer season regions and smaller landscape features, so what's true at one size may not carry over.</li>
