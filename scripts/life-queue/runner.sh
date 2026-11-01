@@ -2,7 +2,7 @@
 # The one process that uses the GPU for life runs. Takes the lock once, runs jobs in
 # order for up to a turn, then gives the other projects a go.
 spool=/tmp/life-spool
-TURN=${LIFE_TURN_SECONDS:-720}
+TURN=${LIFE_TURN_SECONDS:-1200}
 JOB_MINUTES=${LIFE_JOB_MINUTES:-4}
 exec 8>/tmp/auto-gpu.lock
 exec 9>/tmp/cars-gpu.lock
