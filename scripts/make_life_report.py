@@ -348,7 +348,7 @@ def section_roomy():
         return ""
     l = rows[-1]
     w = l.get("world") or {}
-    return f"""<p><b>Does the memory limit shape seed 2?</b> The same seed with twice the room reached {l['cells']:,} cells at tick {l['tick']:,}, with {pct(w.get('budget', {}).get('rest'))} of spending on rest, {pct(other_share(l))} of energy from other cells and {l.get('births_no_slot', 0):,} births blocked in its last stretch.</p>"""
+    return f"""<p><b>Did the memory limit cause seed 2's resting?</b> No. The same seed with twice the room followed the same path, then kept going without blocked births: {l['cells']:,} cells at tick {l['tick']:,}, with {pct(w.get('budget', {}).get('rest'))} of spending on rest and {pct(other_share(l))} of energy from other cells.</p>"""
 
 
 def section_time(worlds):
@@ -519,6 +519,17 @@ def section_voice(ana):
 <p>Signals are two numbers each cell chooses to show its neighbours, with no built-in meaning. Differences between groups could come from real signalling or from one lineage happening to carry a value, and these numbers alone can't tell those apart.</p>{''.join(out)}"""
 
 
+def removal_means():
+    d = EXP / "removal"
+    means = {}
+    for f in (d.glob("*.jsonl") if d.exists() else []):
+        seed, what = f.stem.split("-", 1)
+        _, rows = load_log(f)
+        if rows:
+            means[(seed, what)] = sum(r["cells"] for r in rows) / len(rows)
+    return means
+
+
 def section_removal():
     d = EXP / "removal"
     files = list(d.glob("*.jsonl")) if d.exists() else []
@@ -541,7 +552,7 @@ def section_removal():
             base, v = means.get((s, "none")), means.get((s, what))
             row.append("–" if not base or v is None else f"{(v / base - 1) * 100:+.0f}%")
         rows.append(row)
-    return intro + table(["Removed"] + [s.replace("seed", "Seed ") for s in seeds], rows) + "<p>Each cell compares one run with one control, so a few percent is noise. Big negative numbers mean the world relied on that ability. Big positive numbers mean it was a burden on the population as a whole.</p>"
+    return intro + table(["Removed"] + [s.replace("seed", "Seed ") for s in seeds], rows) + "<p>Each cell compares one run with one control, so a few percent is noise. Big negative numbers mean the world relied on that ability. Big positive numbers mean it was a burden on the population as a whole. Seed 2 was sitting at its memory limit, so gains can't show there, only losses. Population isn't the only thing that can matter: an ability can shape how cells live without changing how many there are.</p>"
 
 
 def section_species(worlds, ana):
@@ -661,10 +672,17 @@ def findings(worlds, ana, is_v2):
     items.append("<b>Colonies hold territory.</b> Different genomes keep separate ground with sharp borders, and you can see it directly in the genome-coloured views.")
     items.append("<b>Scared hasn't evolved.</b> Wanderers steer slightly away from other bodies, but treat bigger and smaller ones about the same, and nothing shows real fleeing or chasing yet. Hunters mostly sit and bite what's next to them.")
     items.append("<b>Scent, gifts and heat are barely used.</b> Each takes under about 1% of spending in baseline, and scent following is weak. Giving cells a feature doesn't mean evolution picks it up.")
-    for n, _, rows in worlds:
-        blocked = sum(r.get("births_no_slot", 0) for r in rows)
-        if blocked > 1000:
-            items.append(f"<b>{n} ran out of memory for new cells.</b> It sat at the limit of {fmt_num(rows[-1]['cells'])} cells, with {blocked / 1e6:.0f} million births blocked. Its resting habit may partly be a response to having no room to breed, so don't read it as a free choice. A rerun with twice the room is queued.")
+    _, roomy = load_log(EXP / "base-roomy/512-seed2.jsonl")
+    if roomy and roomy[-1].get("world"):
+        l = roomy[-1]
+        items.append(f"<b>A passive way of life is real.</b> Seed 2 evolved cells that mostly rest and barely move. It also hit the memory limit, so I reran it with twice the room: with no births blocked, resting evolved the same way, to {l['world']['budget']['rest'] * 100:.0f}% of spending at {l['cells']:,} cells.")
+    means = removal_means()
+    if means:
+        def span(what):
+            vals = [100 * (means[(s, what)] / means[(s, "none")] - 1) for s in ("seed1", "seed2", "seed3") if (s, what) in means and (s, "none") in means]
+            return vals
+        bite = [v for v in span("bite_on")]
+        items.append(f"<b>Few abilities are relied on.</b> Removing biting grew predator worlds by up to {max(bite):.0f}%, so it's a burden on the population as a whole. Memory went both ways: worlds with moving cells did about 10% better without it, and the passive world did 27% worse. Sharing mattered a little in one world. Scent, gifts, heat, enzyme, hearing and sight made no clear difference. See the removal test.")
     items.append("<b>Nothing here beats baseline clearly yet.</b> Several experiments are still waiting for the GPU, so no rule can be called a winner.")
     return "<ul>" + "".join(f"<li>{i}</li>" for i in items) + "</ul>"
 
@@ -679,7 +697,7 @@ def main():
     videos = "".join([
         video("media/world4096.mp4", "4096² world, 2.9 million cells. Left: colour is genome. Right: diet, with green for ground, red for meat and biting. The camera flies to the most varied and predatory places."),
         video("media/world2048.mp4", "2048² world, 950,000 cells, seeded from two evolved worlds that meet at the borders."),
-        video("media/close-world4096.mp4", "Close-up in the 4096² world. Each square is one cell."),
+        video("media/close-world4096.mp4", "Close-up in the 4096² world. Each square is one cell, so you can follow individuals. Left is genes, right is diet."),
         video("media/close-seed3.mp4", "Close-up, seed 3. Watch individual cells move, bite and divide."),
         video("media/close-seed1.mp4", "Close-up, seed 1."),
         video("media/world8192.mp4", "8192², 67 million squares. Too sparse: predators vanish. Useful as a warning."),
@@ -738,7 +756,7 @@ def main():
 {section_scale()}
 <h2 id="limits">Limits</h2>
 <ul>
-<li><b>Memory limit.</b> Experiments and baselines at 512² can hold cells on half the squares. Worlds that fill up hit that limit, and it may shape what evolves in them.</li>
+<li><b>Memory limit.</b> Experiments and baselines at 512² can hold cells on half the squares. Seed 2 hit that limit, though a rerun with twice the room evolved the same habits.</li>
 <li><b>Few runs.</b> Three baseline seeds, and two or three for most experiments. Worlds differ a lot by chance, so treat everything here as leads.</li>
 <li><b>Giant worlds are young.</b> The 4096² world ran about 16,000 ticks from copied tiles, so the regular pattern you can see comes from that. It isn't long enough for much new evolution.</li>
 <li><b>512² isn't the same physics as 4096².</b> Small worlds have fewer season regions and smaller landscape features, so what's true at one size may not carry over.</li>
