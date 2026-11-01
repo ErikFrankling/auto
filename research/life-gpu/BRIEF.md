@@ -39,7 +39,7 @@ Limits on what a dispatch may touch, or results go wrong silently: cells on the 
 ## Running
 
 ```
-/tmp/life-stable/life   real GPU. Takes the GPU lock itself, and may wait behind other jobs
+/tmp/life-stable/life   real GPU, through a queue. Blocks until your run has finished, and shows its output
 /tmp/life-stable/lifesw software driver, no GPU. Slow, for checking your shaders compile and behave
 ```
 
@@ -56,9 +56,9 @@ Wrong WGSL panics with the compiler's message and a line number in the generated
 
 ## Rules of this machine. Breaking these freezes Erik's desktop
 
-- This GPU also draws Erik's 4K screens, and other projects are using it. The binary queues for it. Waiting is normal and can take many minutes. Never kill another process and never touch `/tmp/*-gpu.lock`.
-- Go small to big, always: 128 on the software driver until it compiles and runs, then 256 and 512 on the GPU, and 1024 only once 512 is doing something worth seeing. Do not go above 1024.
-- One GPU run at a time from you. At most 10 minutes for a run, and about 20 minutes of GPU time in total. Never pass `--force`, and don't raise `--duty` or `--target-ms`.
+- This GPU also draws Erik's 4K screens, and other projects are using it. Every run goes through one queue, which takes its turn on the GPU and runs several jobs per turn. A wait of 30 to 60 minutes is normal, and giving up early wastes the experiment, so keep waiting. Queue your whole batch at once, one `agent-job` for each run, so they all go in the same turn. Never kill another process and never touch `/tmp/*-gpu.lock`.
+- Go small to big, always: 128 on the software driver until it compiles and runs, then a short 256 on the GPU, then real results at 512, and 1024 only once 512 is doing something worth seeing. Do not go above 1024. Results at 128 are only a check that the code runs, since a world that small can't hold many ways of living, so don't base a verdict on them.
+- Each run is cut off at 5 minutes of GPU time, which at 512 is about 100,000 ticks. To go on longer, `--save` the world and `--load` it in a new run. Aim for about 20 minutes of GPU time in total, and at most 6 runs in the queue at once. Never pass `--force`, and don't raise `--duty` or `--target-ms`.
 - Software-driver runs: keep them short, and always set `LP_NUM_THREADS=2`.
 - Start long runs with `agent-job run NAME -- CMD` so they survive, and wait with `agent-job attach NAME`. Do not use `&`.
 - Do not run cargo, nix builds, or anything heavy. Don't commit videos. Put them in `/home/erikf/auto/videos/life-gpu/NAME/`.

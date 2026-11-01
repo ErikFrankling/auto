@@ -1,0 +1,3 @@
+#!/bin/sh
+# The binary itself, with what it needs on its paths. Normally reached through the queue.
+PATH=/nix/store/8280gf6l76z9gqb1hwk3c29ivskspjl2-ffmpeg-9.0.2-bin/bin:$PATH LD_LIBRARY_PATH=/nix/store/la62431p5qf1ggr3rdzql9dksv5fhicc-vulkan-loader-1.4.363.0/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH} exec /tmp/life-stable/life-bin "$@"

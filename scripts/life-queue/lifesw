@@ -1,0 +1,3 @@
+#!/bin/sh
+# The same on the software driver: no GPU, no lock. For debugging.
+VK_DRIVER_FILES=/run/opengl-driver/share/vulkan/icd.d/lvp_icd.x86_64.json AUTO_ADAPTER=llvmpipe LP_NUM_THREADS=${LP_NUM_THREADS:-2} exec /tmp/life-stable/direct "$@"

@@ -14,6 +14,10 @@ pub use world::{Pacing, World};
 /// Hold the returned files until the job is done.
 pub fn lock_gpu() -> Vec<std::fs::File> {
     let mut held = vec![];
+    // The queue runner already holds the locks for its jobs.
+    if std::env::var("LIFE_LOCK_HELD").is_ok() {
+        return held;
+    }
     // A software driver on the CPU shares nothing with the desktop.
     if std::env::var("AUTO_ADAPTER").is_ok_and(|a| a.contains("llvmpipe")) {
         return held;

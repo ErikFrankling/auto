@@ -105,6 +105,9 @@ pub struct World {
     pub pacing: Pacing,
     /// Longest and total time the GPU spent on a submission.
     pub longest_submit_ms: f64,
+    /// Submissions over the limit since the last report. The first few of a run don't count:
+    /// they include memory being paged in, and it's sustained holds that make the desktop stutter.
+    pub slow_submits: u32,
     pub gpu_seconds: f64,
     pub submits: u64,
     pub buffers: HashMap<&'static str, wgpu::Buffer>,
@@ -334,6 +337,7 @@ impl World {
             tick: 0,
             pacing,
             longest_submit_ms: 0.0,
+            slow_submits: 0,
             gpu_seconds: 0.0,
             submits: 0,
             buffers,
@@ -701,7 +705,12 @@ impl World {
         let ms = started.elapsed().as_secs_f64() * 1000.0;
         self.submits += 1;
         self.gpu_seconds += ms / 1000.0;
-        self.longest_submit_ms = self.longest_submit_ms.max(ms);
+        if self.submits > 32 {
+            self.longest_submit_ms = self.longest_submit_ms.max(ms);
+            if ms > 80.0 {
+                self.slow_submits += 1;
+            }
+        }
 
         let target = self.pacing.target_ms;
         if ms > target * 1.25 {

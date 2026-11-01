@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Queues a run for the one GPU runner and waits for it. Same flags as the binary.
+# Each lock turn runs many jobs, so nobody waits behind the other projects once per run.
+spool=/tmp/life-spool
+id=$(date +%s%N)-$$
+log=$spool/logs/$id.log
+: > "$log"
+{
+  printf 'cd %q\n' "$PWD"
+  printf 'exec /tmp/life-stable/direct'
+  printf ' %q' "$@"
+  printf '\n'
+} > "$spool/jobs/.$id"
+echo "$$" > "$spool/jobs/$id.pid"
+mv "$spool/jobs/.$id" "$spool/jobs/$id"
+echo "queued for the GPU: job $id" >&2
+tail -n +1 -f --pid=$$ "$log" >&2 &
+tailer=$!
+while [ ! -e "$spool/done/$id" ]; do sleep 2; done
+sleep 0.3
+kill "$tailer" 2>/dev/null
+exit "$(cat "$spool/done/$id")"

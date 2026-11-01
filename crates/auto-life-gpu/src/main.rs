@@ -113,6 +113,11 @@ fn run(args: Args) -> Result<(), String> {
     cfg.hidden_rows = args.hidden_rows;
     cfg.slots = args.slots.unwrap_or_else(|| cfg.default_slots());
 
+    let queued = std::env::var("LIFE_LOCK_HELD").is_ok();
+    let max_minutes = std::env::var("LIFE_MAX_MINUTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map_or(args.max_minutes, |cap: f64| args.max_minutes.min(cap));
     let mut lock = lock_gpu();
     let mut held_since = Instant::now();
     let mut waited = 0.0f64;
@@ -224,7 +229,7 @@ fn run(args: Args) -> Result<(), String> {
             };
             snapshot(&mut world, &name)?;
         }
-        if held_since.elapsed().as_secs_f64() > args.hold_minutes * 60.0 {
+        if !queued && held_since.elapsed().as_secs_f64() > args.hold_minutes * 60.0 {
             world.flush();
             drop(lock);
             std::thread::sleep(std::time::Duration::from_millis(500));
@@ -233,7 +238,7 @@ fn run(args: Args) -> Result<(), String> {
             waited += queue.elapsed().as_secs_f64() + 0.5;
             held_since = Instant::now();
         }
-        let out_of_time = started.elapsed().as_secs_f64() - waited > args.max_minutes * 60.0;
+        let out_of_time = started.elapsed().as_secs_f64() - waited > max_minutes * 60.0;
         if t % args.log_every == 0 || t == args.ticks || out_of_time {
             world.flush();
             let mut r = report(&mut world, &mut tracker);
@@ -260,16 +265,17 @@ fn run(args: Args) -> Result<(), String> {
             );
             (last_tick, last_gpu, last_wall) = (world.tick, world.gpu_seconds, wall);
             let software = std::env::var("AUTO_ADAPTER").is_ok_and(|a| a.contains("llvmpipe"));
-            if !args.force && !software && world.longest_submit_ms > 80.0 {
+            if !args.force && !software && world.slow_submits >= 5 {
                 return Err(format!(
-                    "a submission held the GPU for {:.0} ms, so the desktop would stutter. Use a smaller world.",
-                    world.longest_submit_ms
+                    "{} submissions held the GPU over 80 ms, the longest {:.0} ms, so the desktop would stutter. Use a smaller world.",
+                    world.slow_submits, world.longest_submit_ms
                 ));
             }
             world.longest_submit_ms = 0.0;
+            world.slow_submits = 0;
         }
         if out_of_time {
-            eprintln!("stopping at the time limit of {} minutes", args.max_minutes);
+            eprintln!("stopping at the time limit of {max_minutes} minutes");
             break;
         }
     }
