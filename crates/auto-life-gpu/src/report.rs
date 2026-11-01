@@ -1,0 +1,581 @@
+//! What's alive and how it lives, measured on a random sample of cells. Nothing
+//! here feeds back into the world.
+
+use serde_json::{Value, json};
+
+use crate::config::{CELL_BYTES, STAT_BYTES};
+use crate::world::World;
+
+pub const ACTIONS: [&str; 12] = [
+    "rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme", "x0", "x1",
+];
+const SKETCH_RANGE: f32 = 4.0;
+
+#[derive(Clone)]
+pub struct Sample {
+    pub e: f32,
+    pub womb: f32,
+    pub age: f32,
+    pub pos: u32,
+    pub clade: u32,
+    pub generation: u32,
+    pub x: [f32; 4],
+    pub diet: [f32; 4],
+    pub budget: [f32; 12],
+    pub chase: [f32; 4],
+    pub follow: [f32; 4],
+    pub misc: [f32; 4],
+    pub sketch: [f32; 16],
+    pub genome_at: usize,
+}
+
+pub struct Samples {
+    pub cells: Vec<Sample>,
+    pub genomes: Vec<i8>,
+    pub blocks_bytes: usize,
+}
+
+/// Reads scattered runs of slots, enough to hold about `want` live cells.
+pub fn sample(world: &mut World, want: usize) -> Samples {
+    world.flush();
+    let slots = world.cfg.slots as u64;
+    let alive = world.alive().max(1) as u64;
+    let genome_bytes = world.cfg.blocks() as u64 * 16;
+    let need = (want as u64 * slots / alive).min(slots).min(80_000);
+    const RUN: u64 = 64;
+    let runs = need.div_ceil(RUN).max(1);
+    let gap = (slots / runs).max(1);
+    let starts: Vec<u64> = (0..runs)
+        .map(|k| (k * gap).min(slots.saturating_sub(RUN.min(slots))))
+        .collect();
+    let len = RUN.min(slots);
+    let of = |stride: u64| -> Vec<(u64, u64)> {
+        starts.iter().map(|s| (s * stride, len * stride)).collect()
+    };
+    let cell = world.read_ranges("cell", &of(CELL_BYTES));
+    let stat = world.read_ranges("stat", &of(STAT_BYTES));
+    let sketch = world.read_ranges("sketch", &of(16));
+    let genome = world.read_ranges("genome", &of(genome_bytes));
+
+    let mut cells = vec![];
+    let mut genomes = vec![];
+    let total = starts.len() * len as usize;
+    for i in 0..total {
+        let c: &[u8] = &cell[i * CELL_BYTES as usize..(i + 1) * CELL_BYTES as usize];
+        let f = |k: usize| f32::from_le_bytes(c[k * 4..k * 4 + 4].try_into().unwrap());
+        let u = |k: usize| u32::from_le_bytes(c[k * 4..k * 4 + 4].try_into().unwrap());
+        let (e, age) = (f(0), f(2));
+        if e <= 0.0 || age < 1.0 {
+            continue;
+        }
+        let st: &[f32] =
+            bytemuck::cast_slice(&stat[i * STAT_BYTES as usize..(i + 1) * STAT_BYTES as usize]);
+        let mut sk = [0.0f32; 16];
+        for (k, v) in sketch[i * 16..(i + 1) * 16].iter().enumerate() {
+            sk[k] = (*v as i8) as f32 / 127.0 * SKETCH_RANGE;
+        }
+        let g = &genome[i * genome_bytes as usize..(i + 1) * genome_bytes as usize];
+        let genome_at = genomes.len();
+        genomes.extend(g.iter().map(|b| *b as i8));
+        let arr4 = |k: usize| -> [f32; 4] { st[k..k + 4].try_into().unwrap() };
+        cells.push(Sample {
+            e,
+            womb: f(1),
+            age,
+            pos: u(10),
+            clade: u(12),
+            generation: u(13),
+            x: [f(4), f(5), f(6), f(7)],
+            diet: arr4(0),
+            budget: st[4..16].try_into().unwrap(),
+            chase: arr4(16),
+            follow: arr4(20),
+            misc: arr4(24),
+            sketch: sk,
+            genome_at,
+        });
+    }
+    Samples {
+        cells,
+        genomes,
+        blocks_bytes: genome_bytes as usize,
+    }
+}
+
+fn sketch_gap(a: &Sample, b: &Sample) -> f32 {
+    let mut d = 0.0;
+    for k in 0..16 {
+        let v = a.sketch[k] - b.sketch[k];
+        d += v * v;
+    }
+    (d / 16.0).sqrt()
+}
+
+/// Mating groups in the sample: two cells are joined if their genomes are close,
+/// and species are the connected groups.
+fn groups(cells: &[Sample], limit: usize, tau: f32) -> Vec<Vec<usize>> {
+    let step = (cells.len() / limit.max(1)).max(1);
+    let picked: Vec<usize> = (0..cells.len()).step_by(step).collect();
+    let m = picked.len();
+    let mut parent: Vec<usize> = (0..m).collect();
+    fn find(p: &mut [usize], mut a: usize) -> usize {
+        while p[a] != a {
+            p[a] = p[p[a]];
+            a = p[a];
+        }
+        a
+    }
+    for a in 0..m {
+        for b in a + 1..m {
+            if sketch_gap(&cells[picked[a]], &cells[picked[b]]) < tau {
+                let (x, y) = (find(&mut parent, a), find(&mut parent, b));
+                if x != y {
+                    parent[x] = y;
+                }
+            }
+        }
+    }
+    let mut map: std::collections::HashMap<usize, Vec<usize>> = Default::default();
+    for a in 0..m {
+        let r = find(&mut parent, a);
+        map.entry(r).or_default().push(picked[a]);
+    }
+    let mut out: Vec<Vec<usize>> = map.into_values().collect();
+    out.sort_by_key(|g| std::cmp::Reverse(g.len()));
+    out
+}
+
+fn entropy_species(gs: &[Vec<usize>]) -> f32 {
+    let total: usize = gs.iter().map(|g| g.len()).sum();
+    let h: f32 = gs
+        .iter()
+        .map(|g| {
+            let p = g.len() as f32 / total.max(1) as f32;
+            -p * p.ln()
+        })
+        .sum();
+    h.exp()
+}
+
+fn lives_on(diet: [f32; 4]) -> [f32; 4] {
+    let t = (diet[0] + diet[1] + diet[2] + diet[3]).max(1e-6);
+    [diet[0] / t, diet[1] / t, diet[2] / t, diet[3] / t]
+}
+
+fn behaviour(c: &Sample) -> [f32; 19] {
+    let l = lives_on(c.diet);
+    let mut v = [0.0; 19];
+    v[0] = l[0];
+    v[1] = l[1];
+    v[2] = l[2];
+    v[3] = l[3];
+    v[4..14].copy_from_slice(&c.budget[..10]);
+    v[14] = c.chase[0];
+    v[15] = c.chase[1];
+    v[16] = c.chase[2];
+    v[17] = c.chase[3];
+    v[18] = c.misc[0];
+    v
+}
+
+fn describe(cells: &[Sample], idx: &[usize], total: usize, size: u32) -> Value {
+    let n = idx.len().max(1) as f32;
+    let (mut diet, mut budget, mut chase, mut follow) =
+        ([0.0f32; 4], [0.0f32; 12], [0.0f32; 4], [0.0f32; 4]);
+    let (mut e, mut age, mut gen_, mut crowd, mut bk, mut bo) =
+        (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    let (mut cx, mut sx, mut cy, mut sy) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    for &i in idx {
+        let c = &cells[i];
+        for k in 0..4 {
+            diet[k] += c.diet[k];
+            chase[k] += c.chase[k] / n;
+            follow[k] += c.follow[k] / n;
+        }
+        for k in 0..12 {
+            budget[k] += c.budget[k] / n;
+        }
+        e += c.e / n;
+        age += c.age / n;
+        gen_ += c.generation as f32 / n;
+        crowd += c.misc[0] * 8.0 / n;
+        bk += c.misc[1];
+        bo += c.misc[2];
+        let ax = (c.pos & (size - 1)) as f32 / size as f32 * std::f32::consts::TAU;
+        let ay = (c.pos >> size.trailing_zeros()) as f32 / size as f32 * std::f32::consts::TAU;
+        cx += ax.cos() / n;
+        sx += ax.sin() / n;
+        cy += ay.cos() / n;
+        sy += ay.sin() / n;
+    }
+    let l = lives_on(diet);
+    let mut b = serde_json::Map::new();
+    for k in 0..12 {
+        b.insert(ACTIONS[k].into(), json!(round3(budget[k])));
+    }
+    json!({
+        "share": round3(n / total.max(1) as f32),
+        "energy": round3(e),
+        "age": age.round(),
+        "generation": gen_.round(),
+        "neighbours": round3(crowd),
+        "lives_on": {"ground": round3(l[0]), "meat": round3(l[1]), "bite": round3(l[2]), "gift": round3(l[3])},
+        "budget": b,
+        "moving": round3(chase[3]),
+        "heads_to_bigger": round3(chase[0]),
+        "heads_to_smaller": round3(chase[1]),
+        "heads_to_food": round3(chase[2]),
+        "follows_scent": [round3(follow[0]), round3(follow[1]), round3(follow[2]), round3(follow[3])],
+        "bites_on_similar": if bk + bo > 1e-6 { round3(bk / (bk + bo)) } else { 0.0 },
+        "spread": round3(1.0 - ((cx * cx + sx * sx).sqrt() + (cy * cy + sy * sy).sqrt()) / 2.0),
+    })
+}
+
+fn round3(v: f32) -> f32 {
+    (v * 1000.0).round() / 1000.0
+}
+
+/// Groups cells by how they live, ignoring genes, using k-means on z-scores.
+fn lifestyles(cells: &[Sample], k: usize) -> (Vec<Vec<usize>>, Vec<usize>) {
+    let n = cells.len();
+    let dims = 19;
+    let data: Vec<[f32; 19]> = cells.iter().map(behaviour).collect();
+    let mut mean = [0.0f32; 19];
+    let mut var = [0.0f32; 19];
+    for v in &data {
+        for d in 0..dims {
+            mean[d] += v[d] / n as f32;
+        }
+    }
+    for v in &data {
+        for d in 0..dims {
+            var[d] += (v[d] - mean[d]).powi(2) / n as f32;
+        }
+    }
+    let z: Vec<[f32; 19]> = data
+        .iter()
+        .map(|v| {
+            let mut o = [0.0; 19];
+            for d in 0..dims {
+                o[d] = (v[d] - mean[d]) / var[d].sqrt().max(1e-3);
+            }
+            o
+        })
+        .collect();
+    let dist =
+        |a: &[f32; 19], b: &[f32; 19]| -> f32 { (0..dims).map(|d| (a[d] - b[d]).powi(2)).sum() };
+    // Farthest-first starts make this the same on every run.
+    let mut centres: Vec<[f32; 19]> = vec![z[0]];
+    while centres.len() < k {
+        let far = (0..n)
+            .max_by(|&a, &b| {
+                let da = centres
+                    .iter()
+                    .map(|c| dist(&z[a], c))
+                    .fold(f32::MAX, f32::min);
+                let db = centres
+                    .iter()
+                    .map(|c| dist(&z[b], c))
+                    .fold(f32::MAX, f32::min);
+                da.partial_cmp(&db).unwrap()
+            })
+            .unwrap();
+        centres.push(z[far]);
+    }
+    let mut label = vec![0usize; n];
+    for _ in 0..12 {
+        for i in 0..n {
+            let (mut best, mut bd) = (0, f32::MAX);
+            for (c, centre) in centres.iter().enumerate() {
+                let d = dist(&z[i], centre);
+                if d < bd {
+                    bd = d;
+                    best = c;
+                }
+            }
+            label[i] = best;
+        }
+        let mut sum = vec![[0.0f32; 19]; k];
+        let mut count = vec![0f32; k];
+        for i in 0..n {
+            count[label[i]] += 1.0;
+            for d in 0..dims {
+                sum[label[i]][d] += z[i][d];
+            }
+        }
+        for c in 0..k {
+            if count[c] > 0.0 {
+                for d in 0..dims {
+                    centres[c][d] = sum[c][d] / count[c];
+                }
+            }
+        }
+    }
+    let mut out = vec![vec![]; k];
+    for i in 0..n {
+        out[label[i]].push(i);
+    }
+    (out, label)
+}
+
+/// Share of variation in how cells live that species membership explains.
+/// Near 0 means species are just genetic labels. High means they live differently.
+fn species_explain_behaviour(cells: &[Sample], gs: &[Vec<usize>]) -> f32 {
+    let members: Vec<usize> = gs.iter().flatten().copied().collect();
+    if members.len() < 10 {
+        return 0.0;
+    }
+    let data: Vec<[f32; 19]> = cells.iter().map(behaviour).collect();
+    let mut mean = [0.0f32; 19];
+    for &i in &members {
+        for d in 0..19 {
+            mean[d] += data[i][d] / members.len() as f32;
+        }
+    }
+    let (mut within, mut total) = (0.0f32, 0.0f32);
+    for g in gs {
+        let mut gm = [0.0f32; 19];
+        for &i in g {
+            for d in 0..19 {
+                gm[d] += data[i][d] / g.len() as f32;
+            }
+        }
+        for &i in g {
+            for d in 0..19 {
+                within += (data[i][d] - gm[d]).powi(2);
+                total += (data[i][d] - mean[d]).powi(2);
+            }
+        }
+    }
+    if total <= 0.0 {
+        0.0
+    } else {
+        1.0 - within / total
+    }
+}
+
+pub struct Tracker {
+    pub last: [u32; 32],
+}
+
+/// One line of the log.
+pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
+    let samples = sample(world, 6000);
+    let cells = &samples.cells;
+    let counters = world.counters();
+    let d = |k: usize| counters[k].wrapping_sub(tracker.last[k]);
+    let (births, mixed, starved, bitten, burned, old, rained) =
+        (d(3), d(4), d(5), d(6), d(7), d(8), d(9));
+    tracker.last = counters;
+    let n = world.alive();
+    let tau = world.cfg.f("report_tau");
+    let size = world.cfg.size;
+    let mut out = json!({
+        "tick": world.tick,
+        "cells": n,
+        "density": n as f64 / world.open.max(1) as f64,
+        "births": births,
+        "births_mixed": mixed,
+        "deaths": {"starved": starved, "bitten": bitten, "burned": burned, "old": old},
+        "rained": rained,
+    });
+    if cells.len() < 10 {
+        return out;
+    }
+    let all: Vec<usize> = (0..cells.len()).collect();
+    out["world"] = describe(cells, &all, cells.len(), size);
+
+    let gs = groups(cells, 1500, tau);
+    let sampled: usize = gs.iter().map(|g| g.len()).sum();
+    out["groups"] = json!(gs.len());
+    out["groups_1pct"] = json!(gs.iter().filter(|g| g.len() * 100 >= sampled).count());
+    out["effective_species"] = json!(round3(entropy_species(&gs)));
+    out["species_explain_behaviour"] = json!(round3(species_explain_behaviour(cells, &gs)));
+    let mut at = serde_json::Map::new();
+    for t in [0.05f32, 0.1, 0.15, 0.2, 0.3, 0.5] {
+        let g = groups(cells, 800, t);
+        at.insert(format!("{t}"), json!(round3(entropy_species(&g))));
+    }
+    out["species_at"] = Value::Object(at);
+    out["species"] = Value::Array(
+        gs.iter()
+            .filter(|g| g.len() * 100 >= sampled)
+            .take(10)
+            .map(|g| describe(cells, g, sampled, size))
+            .collect(),
+    );
+
+    // Real weight differences between random pairs, not the projection.
+    let m = cells.len();
+    let mut gaps = vec![];
+    let mut state = world.tick ^ 0x1234_5678;
+    let mut pick = |n: usize| {
+        state = state
+            .wrapping_mul(0x9E3779B97F4A7C15)
+            .wrapping_add(0xBF58476D1CE4E5B9);
+        ((state >> 33) as usize) % n
+    };
+    for _ in 0..1500 {
+        let (a, b) = (pick(m), pick(m));
+        if a == b {
+            continue;
+        }
+        let bytes = samples.blocks_bytes;
+        let ga = &samples.genomes[cells[a].genome_at..cells[a].genome_at + bytes];
+        let gb = &samples.genomes[cells[b].genome_at..cells[b].genome_at + bytes];
+        let sum: f32 = ga
+            .iter()
+            .zip(gb)
+            .map(|(x, y)| (*x as f32 - *y as f32).powi(2))
+            .sum();
+        gaps.push((sum / bytes as f32).sqrt() / 127.0 * 2.0);
+    }
+    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let pct = |p: f32| {
+        if gaps.is_empty() {
+            0.0
+        } else {
+            round3(gaps[((gaps.len() - 1) as f32 * p) as usize])
+        }
+    };
+    out["genome_gap"] = json!({"p10": pct(0.1), "p50": pct(0.5), "p90": pct(0.9), "max": pct(1.0)});
+
+    let (life, label) = lifestyles(cells, 6.min(m));
+    let mut styles: Vec<&Vec<usize>> = life.iter().filter(|g| !g.is_empty()).collect();
+    styles.sort_by_key(|g| std::cmp::Reverse(g.len()));
+    out["lifestyles"] = Value::Array(styles.iter().map(|g| describe(cells, g, m, size)).collect());
+    let _ = label;
+
+    let mut clades: std::collections::HashMap<u32, u32> = Default::default();
+    for c in cells.iter() {
+        *clades.entry(c.clade).or_default() += 1;
+    }
+    out["founder_lines"] = json!(clades.len());
+    // The distribution people ask about first: how many cells mostly eat other cells.
+    let mut diet_hist = [0u32; 10];
+    for c in cells.iter() {
+        let l = lives_on(c.diet);
+        diet_hist[(((l[1] + l[2]) * 10.0) as usize).min(9)] += 1;
+    }
+    out["from_other_cells_hist"] = json!(diet_hist);
+    out
+}
+
+/// A world's main axes of genome difference, for colouring cells.
+pub struct Palette {
+    pub m: [[f32; 16]; 3],
+    pub mean: [f32; 16],
+    pub gain: [f32; 3],
+    ready: bool,
+}
+
+impl Default for Palette {
+    fn default() -> Self {
+        Palette {
+            m: [[0.0; 16]; 3],
+            mean: [0.0; 16],
+            gain: [1.0; 3],
+            ready: false,
+        }
+    }
+}
+
+impl Palette {
+    /// Updates from a sample. Axes turn slowly and keep their sign, so a lineage keeps its colour.
+    pub fn update(&mut self, cells: &[Sample]) {
+        if cells.len() < 8 {
+            return;
+        }
+        let n = cells.len() as f32;
+        let mut mean = [0.0f32; 16];
+        for c in cells {
+            for k in 0..16 {
+                mean[k] += c.sketch[k] / n;
+            }
+        }
+        let mut cov = [[0.0f32; 16]; 16];
+        for c in cells {
+            for a in 0..16 {
+                for b in 0..16 {
+                    cov[a][b] += (c.sketch[a] - mean[a]) * (c.sketch[b] - mean[b]) / n;
+                }
+            }
+        }
+        let mut axes = [[0.0f32; 16]; 3];
+        let mut sd = [1.0f32; 3];
+        for (axis, slot) in axes.iter_mut().enumerate() {
+            let mut v = if self.ready {
+                self.m[axis]
+            } else {
+                std::array::from_fn(|k| if k == axis { 1.0 } else { 0.1 })
+            };
+            for _ in 0..30 {
+                let mut next = [0.0f32; 16];
+                for a in 0..16 {
+                    for b in 0..16 {
+                        next[a] += cov[a][b] * v[b];
+                    }
+                }
+                let len = next.iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-9);
+                next.iter_mut().for_each(|x| *x /= len);
+                v = next;
+            }
+            let mut lambda = 0.0;
+            let mut cv = [0.0f32; 16];
+            for a in 0..16 {
+                for b in 0..16 {
+                    cv[a] += cov[a][b] * v[b];
+                }
+                lambda += cv[a] * v[a];
+            }
+            sd[axis] = lambda.max(1e-6).sqrt();
+            for a in 0..16 {
+                for b in 0..16 {
+                    cov[a][b] -= lambda * v[a] * v[b];
+                }
+            }
+            *slot = v;
+        }
+        if self.ready {
+            for a in 0..3 {
+                let along: f32 = (0..16).map(|k| axes[a][k] * self.m[a][k]).sum();
+                let flip = if along < 0.0 { -1.0 } else { 1.0 };
+                for k in 0..16 {
+                    axes[a][k] = self.m[a][k] * 0.8 + axes[a][k] * flip * 0.2;
+                }
+                let len = axes[a].iter().map(|x| x * x).sum::<f32>().sqrt().max(1e-9);
+                axes[a].iter_mut().for_each(|x| *x /= len);
+            }
+            for k in 0..16 {
+                self.mean[k] = self.mean[k] * 0.8 + mean[k] * 0.2;
+            }
+            for a in 0..3 {
+                self.gain[a] = self.gain[a] * 0.8 + (1.2 / sd[a]) * 0.2;
+            }
+        } else {
+            self.mean = mean;
+            self.gain = [1.2 / sd[0], 1.2 / sd[1], 1.2 / sd[2]];
+            self.ready = true;
+        }
+        self.m = axes;
+    }
+
+    /// Bytes for the bake pass's uniform.
+    pub fn bytes(&self) -> Vec<u8> {
+        let mut v: Vec<f32> = vec![];
+        for axis in &self.m {
+            v.extend_from_slice(axis);
+        }
+        // Sketches are stored in +-1 of the snorm range, so the mean and gain are converted.
+        for k in 0..16 {
+            v.push(self.mean[k] / SKETCH_RANGE);
+        }
+        v.extend_from_slice(&[
+            self.gain[0] * SKETCH_RANGE,
+            self.gain[1] * SKETCH_RANGE,
+            self.gain[2] * SKETCH_RANGE,
+            0.0,
+        ]);
+        bytemuck::cast_slice(&v).to_vec()
+    }
+}

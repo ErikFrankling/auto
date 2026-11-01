@@ -209,6 +209,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "auto-life-gpu"
+version = "0.1.0"
+dependencies = [
+ "auto-core",
+ "bytemuck",
+ "clap",
+ "pollster",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
 name = "auto-vk"
 version = "0.1.0"
 dependencies = [

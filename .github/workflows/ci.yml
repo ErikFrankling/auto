@@ -17,4 +17,4 @@ jobs:
       - name: Both targets stay buildable
         run: cargo check --release -p auto-web --target wasm32-unknown-unknown
       - name: Tests, on lavapipe
-        run: cargo test --release -p auto-core -p auto-cpu
+        run: cargo test --release -p auto-core -p auto-cpu -p auto-life -p auto-life-gpu
