@@ -2,8 +2,9 @@
 //! card for long, because the same card draws Erik's desktop.
 //!
 //! Each square has at most one cell, and cells run on a 4x4 lattice, so cells that
-//! run at the same time can't touch the same data. There are no locks, and a run
-//! is the same every time.
+//! run at the same time can't touch the same data. There are no locks, and a run is
+//! the same every time as long as free slots remain. When they run out, which births
+//! get the last ones depends on timing.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -183,7 +184,18 @@ impl World {
             ("stat", "Stat", slots * STAT_BYTES, copy),
             ("sketch", "vec4u", slots * 16, copy),
             ("mem", "vec4f", slots * cfg.hidden_rows as u64 * 16, copy),
-            ("genome", "vec4u", slots * blocks * 16, copy),
+            (
+                "genome",
+                "vec4u",
+                slots.min(cfg.shard_slots as u64) * blocks * 16,
+                copy,
+            ),
+            (
+                "genome1",
+                "vec4u",
+                (slots.saturating_sub(cfg.shard_slots as u64) * blocks * 16).max(16),
+                copy,
+            ),
             ("ring", "u32", ring_cap * 4, copy),
             ("jobs", "vec4u", slots * 16, copy),
             ("ctr", "atomic<u32>", 32 * 4, copy),
@@ -237,6 +249,7 @@ impl World {
                     ("occ", RW),
                     ("seen_next", RW),
                     ("cell", RW),
+                    ("stat", RW),
                     ("mem", RW),
                     ("ring", R),
                     ("ctr", RW),
@@ -872,7 +885,7 @@ impl World {
         let mut f =
             std::io::BufWriter::new(std::fs::File::create(path).map_err(|e| e.to_string())?);
         let head = serde_json::json!({
-            "size": self.cfg.size, "slots": self.cfg.slots, "hidden_rows": self.cfg.hidden_rows,
+            "size": self.cfg.size, "slots": self.cfg.slots, "shard_slots": self.cfg.shard_slots, "hidden_rows": self.cfg.hidden_rows,
             "seed": self.cfg.seed, "tick": self.tick, "rng": self.rng, "sun_k": self.sun_k, "open": self.open,
             "start_ground": self.start_ground, "physics": self.cfg.physics,
         })
@@ -880,7 +893,7 @@ impl World {
         f.write_all(&(head.len() as u64).to_le_bytes())
             .map_err(|e| e.to_string())?;
         f.write_all(head.as_bytes()).map_err(|e| e.to_string())?;
-        for name in SAVED {
+        for name in self.saved_names() {
             let size = self.buffers[name].size();
             let mut at = 0;
             while at < size {
@@ -902,7 +915,11 @@ impl World {
         let mut head = vec![0u8; u64::from_le_bytes(len) as usize];
         f.read_exact(&mut head).map_err(|e| e.to_string())?;
         let head: serde_json::Value = serde_json::from_slice(&head).map_err(|e| e.to_string())?;
-        if head["size"] != self.cfg.size
+        let shard = head["shard_slots"]
+            .as_u64()
+            .unwrap_or(self.cfg.max_shard_slots() as u64);
+        if shard != self.cfg.shard_slots as u64
+            || head["size"] != self.cfg.size
             || head["slots"] != self.cfg.slots
             || head["hidden_rows"] != self.cfg.hidden_rows
         {
@@ -917,7 +934,7 @@ impl World {
         self.open = head["open"].as_u64().unwrap_or(0);
         self.start_ground = head["start_ground"].as_f64().unwrap_or(0.0);
         let mut chunk = vec![0u8; 64 << 20];
-        for name in SAVED {
+        for name in self.saved_names() {
             let size = self.buffers[name].size();
             let mut at = 0;
             while at < size {
@@ -991,6 +1008,15 @@ fn build_pipe(
     String,
 > {
     let device = &gpu.device;
+    // A world with two genome buffers binds the second wherever the first is bound.
+    let mut expanded: Vec<(&'static str, Access)> = binds.to_vec();
+    let genome_access = binds.iter().find(|(n, _)| *n == "genome").map(|(_, a)| *a);
+    if let Some(access) = genome_access
+        && cfg.two_shards()
+    {
+        expanded.push(("genome1", access));
+    }
+    let binds = &expanded[..];
     let mut src = cfg.header();
     src += WGSL_STRUCTS;
     src += "@group(0) @binding(0) var<uniform> F: Frame;\n";
@@ -1014,6 +1040,20 @@ fn build_pipe(
         entries.push(storage_entry(i as u32 + 1, *access == R));
     }
     src += &cfg.source("common.wgsl")?;
+    if let Some(access) = genome_access {
+        src += if cfg.two_shards() {
+            "fn gene(i: u32) -> vec4u { if (i < SHARD_BLOCKS) { return genome[i]; } return genome1[i - SHARD_BLOCKS]; }\n"
+        } else {
+            "fn gene(i: u32) -> vec4u { return genome[i]; }\n"
+        };
+        if access == RW {
+            src += if cfg.two_shards() {
+                "fn set_gene(i: u32, g: vec4u) { if (i < SHARD_BLOCKS) { genome[i] = g; } else { genome1[i - SHARD_BLOCKS] = g; } }\n"
+            } else {
+                "fn set_gene(i: u32, g: vec4u) { genome[i] = g; }\n"
+            };
+        }
+    }
     let mut body = cfg.source(file)?;
     if body.contains("//@BRAIN") {
         let (brain, copy) = cfg.brain_wgsl();
@@ -1094,7 +1134,7 @@ impl World {
         q.write_buffer(&self.buffers["seen_next"], p * 4, bytemuck::bytes_of(&word));
         let g = self.cfg.blocks() as u64 * 16;
         assert_eq!(genome.len() as u64, g);
-        q.write_buffer(&self.buffers["genome"], slot as u64 * g, genome);
+        self.write_genomes(slot as u64, genome);
         q.submit([]);
         self.gpu.wait();
         slot
@@ -1133,7 +1173,7 @@ impl World {
 
     pub fn read_genome(&self, slot: u32) -> Vec<u8> {
         let g = self.cfg.blocks() as u64 * 16;
-        self.read_ranges("genome", &[(slot as u64 * g, g)])
+        self.read_genomes(&[(slot as u64, 1)], g)
     }
 
     pub fn read_mem(&self, slot: u32) -> Vec<f32> {
@@ -1144,11 +1184,18 @@ impl World {
 }
 
 /// A saved world's buffers, in file order, with their sizes.
-fn saved_layout(size: u64, slots: u64, hidden_rows: u64) -> Vec<(&'static str, u64)> {
+fn saved_layout(size: u64, slots: u64, hidden_rows: u64, shard: u64) -> Vec<(&'static str, u64)> {
     let squares = size * size;
     let blocks = hidden_rows
         * (crate::config::IN_BLOCKS as u64 + hidden_rows + crate::config::OUT_ROWS as u64);
-    SAVED
+    let mut names: Vec<&'static str> = SAVED.to_vec();
+    if slots > shard {
+        names.insert(
+            names.iter().position(|n| *n == "genome").unwrap() + 1,
+            "genome1",
+        );
+    }
+    names
         .iter()
         .map(|name| {
             let bytes = match *name {
@@ -1158,7 +1205,8 @@ fn saved_layout(size: u64, slots: u64, hidden_rows: u64) -> Vec<(&'static str, u
                 "stat" => slots * STAT_BYTES,
                 "sketch" | "jobs" => slots * 16,
                 "mem" => slots * hidden_rows * 16,
-                "genome" => slots * blocks * 16,
+                "genome" => slots.min(shard) * blocks * 16,
+                "genome1" => (slots - shard) * blocks * 16,
                 "ring" => (slots as u32).next_power_of_two() as u64 * 4,
                 "ctr" => 32 * 4,
                 "ctl" => 8 * 4,
@@ -1190,6 +1238,8 @@ impl World {
             sketch: Vec<u8>,
             mem_at: u64,
             genome_at: u64,
+            genome1_at: u64,
+            shard: u64,
             size: u64,
         }
         let mut sources = vec![];
@@ -1213,7 +1263,10 @@ impl World {
             }
             let mut at = 8 + u64::from_le_bytes(len);
             let mut offsets = std::collections::HashMap::new();
-            for (name, bytes) in saved_layout(src, slots, hr) {
+            let src_shard = head["shard_slots"]
+                .as_u64()
+                .unwrap_or(self.cfg.max_shard_slots() as u64);
+            for (name, bytes) in saved_layout(src, slots, hr, src_shard) {
                 offsets.insert(name, (at, bytes));
                 at += bytes;
             }
@@ -1233,6 +1286,8 @@ impl World {
                 sketch,
                 mem_at: offsets["mem"].0,
                 genome_at: offsets["genome"].0,
+                genome1_at: offsets.get("genome1").map_or(0, |o| o.0),
+                shard: src_shard,
                 file: f,
                 size: src,
             });
@@ -1298,7 +1353,11 @@ impl World {
                         genomes.resize(at_gen + genome_bytes, 0u8);
                         source
                             .file
-                            .seek(SeekFrom::Start(source.genome_at + s * genome_bytes as u64))
+                            .seek(SeekFrom::Start(if s < source.shard {
+                                source.genome_at + s * genome_bytes as u64
+                            } else {
+                                source.genome1_at + (s - source.shard) * genome_bytes as u64
+                            }))
                             .map_err(|e| e.to_string())?;
                         source
                             .file
@@ -1363,17 +1422,81 @@ impl World {
         Ok(slot - first_slot)
     }
 
+    /// The buffers a saved world holds, in file order.
+    fn saved_names(&self) -> Vec<&'static str> {
+        let mut names: Vec<&'static str> = SAVED.to_vec();
+        if self.cfg.two_shards() {
+            names.insert(
+                names.iter().position(|n| *n == "genome").unwrap() + 1,
+                "genome1",
+            );
+        }
+        names
+    }
+
+    /// Writes the genomes of consecutive slots, across both buffers if needed.
+    fn write_genomes(&self, start: u64, bytes: &[u8]) {
+        let g = self.cfg.blocks() as u64 * 16;
+        let shard = self.cfg.shard_slots as u64;
+        let slots = bytes.len() as u64 / g;
+        let first = shard.saturating_sub(start).min(slots);
+        let (a, b) = bytes.split_at((first * g) as usize);
+        let q = &self.gpu.queue;
+        if !a.is_empty() {
+            q.write_buffer(&self.buffers["genome"], start * g, a);
+        }
+        if !b.is_empty() {
+            q.write_buffer(&self.buffers["genome1"], (start + first - shard) * g, b);
+        }
+    }
+
+    /// Reads the genomes of runs of slots, as (first slot, how many), in the order given.
+    pub fn read_genomes(&self, runs: &[(u64, u64)], g: u64) -> Vec<u8> {
+        let shard = self.cfg.shard_slots as u64;
+        let (mut near, mut far) = (vec![], vec![]);
+        for (start, len) in runs {
+            let first = shard.saturating_sub(*start).min(*len);
+            if first > 0 {
+                near.push((*start * g, first * g));
+            }
+            if first < *len {
+                far.push(((*start + first - shard) * g, (*len - first) * g));
+            }
+        }
+        let a = if near.is_empty() {
+            vec![]
+        } else {
+            self.read_ranges("genome", &near)
+        };
+        let b = if far.is_empty() {
+            vec![]
+        } else {
+            self.read_ranges("genome1", &far)
+        };
+        let mut out = Vec::with_capacity(a.len() + b.len());
+        let (mut at_a, mut at_b) = (0usize, 0usize);
+        for (start, len) in runs {
+            let first = shard.saturating_sub(*start).min(*len);
+            let n = (first * g) as usize;
+            out.extend_from_slice(&a[at_a..at_a + n]);
+            at_a += n;
+            let m = ((*len - first) * g) as usize;
+            out.extend_from_slice(&b[at_b..at_b + m]);
+            at_b += m;
+        }
+        out
+    }
+
     fn write_slots(&self, start: u64, cells: &[u8], sketches: &[u8], mems: &[u8], genomes: &[u8]) {
         if cells.is_empty() {
             return;
         }
         let hr = self.cfg.hidden_rows as u64;
-        let blocks = self.cfg.blocks() as u64;
         let q = &self.gpu.queue;
         q.write_buffer(&self.buffers["cell"], start * CELL_BYTES, cells);
         q.write_buffer(&self.buffers["sketch"], start * 16, sketches);
         q.write_buffer(&self.buffers["mem"], start * hr * 16, mems);
-        q.write_buffer(&self.buffers["genome"], start * blocks * 16, genomes);
+        self.write_genomes(start, genomes);
         q.submit([]);
         self.gpu.wait();
     }

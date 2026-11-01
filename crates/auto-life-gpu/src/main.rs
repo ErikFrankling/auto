@@ -111,6 +111,7 @@ fn run(args: Args) -> Result<(), String> {
         cfg.set(k, v)?;
     }
     cfg.hidden_rows = args.hidden_rows;
+    cfg.shard_slots = cfg.max_shard_slots();
     cfg.slots = args.slots.unwrap_or_else(|| cfg.default_slots());
 
     let queued = std::env::var("LIFE_LOCK_HELD").is_ok();

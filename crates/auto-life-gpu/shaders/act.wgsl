@@ -13,7 +13,7 @@ const EN1 = vec4f(1.0, PHEROMONES_ON_F, HEAT_ON_F, BITE_ON_F);
 const EN2 = vec4f(GIVE_ON_F, ENZYME_ON_F, X0_ON_F, X1_ON_F);
 
 fn bt(i: u32, v: vec4f) -> vec4f {
-    let g = genome[i];
+    let g = gene(i);
     return vec4f(
         dot(unpack4x8snorm(g.x), v),
         dot(unpack4x8snorm(g.y), v),
@@ -328,6 +328,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
                 kid.x0 = c.x0;
                 kid.x1 = c.x1;
                 cell[child] = kid;
+                // The slot's last owner's measurements mustn't colour this cell's.
+                var blank: Stat;
+                stat[child] = blank;
                 //@MEMCOPY
                 occ[free_q] = child + 1u;
                 seen_next[free_q] = 0x80u | (r & 7u);
@@ -337,6 +340,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
                 c.womb = 0.0;
                 atomicAdd(&ctr[C_BIRTHS], 1u);
                 if (mate != 0u) { atomicAdd(&ctr[C_MIXED], 1u); }
+            } else {
+                atomicAdd(&ctr[C_NO_SLOT], 1u);
             }
         }
     }

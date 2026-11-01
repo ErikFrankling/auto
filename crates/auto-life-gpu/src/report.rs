@@ -42,7 +42,8 @@ pub fn sample(world: &mut World, want: usize) -> Samples {
     let alive = world.alive().max(1) as u64;
     let genome_bytes = world.cfg.blocks() as u64 * 16;
     let need = (want as u64 * slots / alive).min(slots).min(80_000);
-    const RUN: u64 = 64;
+    // Short runs: slots are reused in order of death, so neighbouring slots are cells of the same age.
+    const RUN: u64 = 8;
     let runs = need.div_ceil(RUN).max(1);
     let gap = (slots / runs).max(1);
     let starts: Vec<u64> = (0..runs)
@@ -55,7 +56,8 @@ pub fn sample(world: &mut World, want: usize) -> Samples {
     let cell = world.read_ranges("cell", &of(CELL_BYTES));
     let stat = world.read_ranges("stat", &of(STAT_BYTES));
     let sketch = world.read_ranges("sketch", &of(16));
-    let genome = world.read_ranges("genome", &of(genome_bytes));
+    let run_list: Vec<(u64, u64)> = starts.iter().map(|s| (*s, len)).collect();
+    let genome = world.read_genomes(&run_list, genome_bytes);
 
     let mut cells = vec![];
     let mut genomes = vec![];
@@ -322,7 +324,7 @@ fn lifestyles(cells: &[Sample], k: usize) -> (Vec<Vec<usize>>, Vec<usize>) {
 /// only groups of at least 1% of the sample and corrected for the number of groups,
 /// since a group of one cell always "explains" itself. Near 0 means species are just
 /// genetic labels. High means they really live differently.
-fn species_explain_behaviour(cells: &[Sample], gs: &[Vec<usize>]) -> f32 {
+fn species_explain_behaviour(cells: &[Sample], gs: &[Vec<usize>], scaled: bool) -> f32 {
     let sampled: usize = gs.iter().map(|g| g.len()).sum();
     let big: Vec<&Vec<usize>> = gs.iter().filter(|g| g.len() * 100 >= sampled).collect();
     let members: Vec<usize> = big.iter().flat_map(|g| g.iter().copied()).collect();
@@ -330,12 +332,27 @@ fn species_explain_behaviour(cells: &[Sample], gs: &[Vec<usize>]) -> f32 {
     if k < 2 || members.len() <= k + 1 {
         return 0.0;
     }
-    let data: Vec<[f32; 19]> = cells.iter().map(behaviour).collect();
+    let mut data: Vec<[f32; 19]> = cells.iter().map(behaviour).collect();
     let mut mean = [0.0f32; 19];
     for &i in &members {
         for d in 0..19 {
             mean[d] += data[i][d] / members.len() as f32;
         }
+    }
+    // Scaled, every measure counts the same, so noisy ones can't drown out a clean split in diet.
+    if scaled {
+        let mut var = [0.0f32; 19];
+        for &i in &members {
+            for d in 0..19 {
+                var[d] += (data[i][d] - mean[d]).powi(2) / members.len() as f32;
+            }
+        }
+        for row in data.iter_mut() {
+            for d in 0..19 {
+                row[d] = (row[d] - mean[d]) / var[d].sqrt().max(1e-3);
+            }
+        }
+        mean = [0.0; 19];
     }
     let (mut within, mut total) = (0.0f32, 0.0f32);
     for g in &big {
@@ -372,6 +389,7 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
     let d = |k: usize| counters[k].wrapping_sub(tracker.last[k]);
     let (births, mixed, starved, bitten, burned, old, rained) =
         (d(3), d(4), d(5), d(6), d(7), d(8), d(9));
+    let no_slot = d(13);
     tracker.last = counters;
     let n = world.alive();
     // Fixed here, so logs from all experiments compare. Genomes drift fast, about 0.03 of
@@ -386,6 +404,7 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
         "births_mixed": mixed,
         "deaths": {"starved": starved, "bitten": bitten, "burned": burned, "old": old},
         "rained": rained,
+        "births_no_slot": no_slot,
     });
     if cells.len() < 10 {
         return out;
@@ -398,7 +417,8 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
     out["groups"] = json!(gs.len());
     out["groups_1pct"] = json!(gs.iter().filter(|g| g.len() * 100 >= sampled).count());
     out["effective_species"] = json!(round3(entropy_species(&gs)));
-    out["species_explain_behaviour"] = json!(round3(species_explain_behaviour(cells, &gs)));
+    out["species_explain_behaviour"] = json!(round3(species_explain_behaviour(cells, &gs, false)));
+    out["species_explain_scaled"] = json!(round3(species_explain_behaviour(cells, &gs, true)));
     let mut at = serde_json::Map::new();
     for t in [0.05f32, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0] {
         let g = groups(cells, 800, t);

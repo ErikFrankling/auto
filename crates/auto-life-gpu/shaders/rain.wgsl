@@ -27,6 +27,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     r = pcg(r);
     c.clade = r;
     cell[child] = c;
+    var blank: Stat;
+    stat[child] = blank;
     for (var k = 0u; k < HR; k++) { mem[child * HR + k] = vec4f(0.0); }
     occ[p] = child + 1u;
     seen_next[p] = 0x80u | (r & 7u);

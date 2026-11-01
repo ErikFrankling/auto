@@ -23,6 +23,8 @@ pub struct Config {
     pub seed: u32,
     /// Rows of four memory units.
     pub hidden_rows: u32,
+    /// Slots that fit in one genome buffer. A buffer can't pass 2 GB here, so bigger worlds use two.
+    pub shard_slots: u32,
     pub physics: Map<String, Value>,
     pub shaders: Option<PathBuf>,
 }
@@ -43,11 +45,13 @@ impl Config {
         let mut cfg = Config {
             size,
             slots: 0,
+            shard_slots: 0,
             seed,
             hidden_rows: 2,
             physics,
             shaders,
         };
+        cfg.shard_slots = cfg.max_shard_slots();
         cfg.slots = cfg.default_slots();
         Ok(cfg)
     }
@@ -56,11 +60,20 @@ impl Config {
         self.hidden_rows * (IN_BLOCKS + self.hidden_rows + OUT_ROWS)
     }
 
+    pub fn max_shard_slots(&self) -> u32 {
+        ((2u64 << 30) / (self.blocks() as u64 * 16)) as u32
+    }
+
     pub fn default_slots(&self) -> u32 {
         let squares = self.size as u64 * self.size as u64;
-        // A single genome buffer is limited to 2 GB here.
-        let cap = (2u64 << 30) / (self.blocks() as u64 * 16);
-        (squares / 2).min(cap).max(1024) as u32
+        (squares / 2)
+            .min(self.max_shard_slots() as u64 * 2)
+            .max(1024) as u32
+    }
+
+    /// Whether the genomes need a second buffer.
+    pub fn two_shards(&self) -> bool {
+        self.slots > self.shard_slots
     }
 
     pub fn vram_bytes(&self) -> u64 {
@@ -116,7 +129,7 @@ impl Config {
         let (hr, blocks) = (self.hidden_rows, self.blocks());
         let tile = self.tile();
         let mut s = format!(
-            "const W: u32 = {w}u;\nconst LOG_W: u32 = {log}u;\nconst MASK: u32 = {m}u;\nconst SLOTS: u32 = {slots}u;\nconst RING_MASK: u32 = {rm}u;\nconst HR: u32 = {hr}u;\nconst IN_BLOCKS: u32 = {IN_BLOCKS}u;\nconst OUT_ROWS: u32 = {OUT_ROWS}u;\nconst BLOCKS: u32 = {blocks}u;\nconst HH_BASE: u32 = {hh}u;\nconst HO_BASE: u32 = {ho}u;\nconst TILE: u32 = {tile}u;\nconst TILES: u32 = {tiles}u;\nconst SUN_RANGE: f32 = {SUN_RANGE:?};\n",
+            "const W: u32 = {w}u;\nconst LOG_W: u32 = {log}u;\nconst MASK: u32 = {m}u;\nconst SLOTS: u32 = {slots}u;\nconst RING_MASK: u32 = {rm}u;\nconst HR: u32 = {hr}u;\nconst IN_BLOCKS: u32 = {IN_BLOCKS}u;\nconst OUT_ROWS: u32 = {OUT_ROWS}u;\nconst BLOCKS: u32 = {blocks}u;\nconst HH_BASE: u32 = {hh}u;\nconst HO_BASE: u32 = {ho}u;\nconst TILE: u32 = {tile}u;\nconst TILES: u32 = {tiles}u;\nconst SUN_RANGE: f32 = {SUN_RANGE:?};\nconst SHARD_BLOCKS: u32 = {shard_blocks}u;\n",
             w = self.size,
             m = self.size - 1,
             slots = self.slots,
@@ -124,6 +137,7 @@ impl Config {
             hh = hr * IN_BLOCKS,
             ho = hr * IN_BLOCKS + hr * hr,
             tiles = self.size / tile,
+            shard_blocks = self.shard_slots as u64 * blocks as u64,
         );
         for (k, v) in &self.physics {
             let name = k.to_uppercase();

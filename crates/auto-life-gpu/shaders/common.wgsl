@@ -17,6 +17,8 @@ const C_RAINED: u32 = 9u;
 const C_LOST: u32 = 10u;
 const C_SUN: u32 = 11u;
 const C_RAIN_E: u32 = 12u;
+// Births that had a free square but no free slot, so the world is at its memory limit.
+const C_NO_SLOT: u32 = 13u;
 // 16..31 are free for experiments.
 const C_X0: u32 = 16u;
 const LEDGER_SCALE: f32 = 4096.0;

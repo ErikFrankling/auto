@@ -61,9 +61,9 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
         if (parent == NONE) {
             g = vec4u(random_word(&r), random_word(&r), random_word(&r), random_word(&r));
         } else {
-            g = genome[parent * BLOCKS + b];
+            g = gene(parent * BLOCKS + b);
             if (mate != 0u) {
-                let h = genome[(mate - 1u) * BLOCKS + b];
+                let h = gene((mate - 1u) * BLOCKS + b);
                 if (b < HO_BASE) {
                     let row = select((b - HH_BASE) / HR, b / IN_BLOCKS, b < HH_BASE);
                     let bits = (units >> (row * 4u)) & 15u;
@@ -79,7 +79,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
             }
             g = vec4u(mutate_word(g.x, &r), mutate_word(g.y, &r), mutate_word(g.z, &r), mutate_word(g.w, &r));
         }
-        genome[child * BLOCKS + b] = g;
+        set_gene(child * BLOCKS + b, g);
         // A fixed random projection of the weights, used for colour and for measuring similarity.
         for (var w = 0u; w < 4u; w++) {
             let h = pcg(b * 4u + w + 12345u);

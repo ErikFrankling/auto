@@ -662,3 +662,54 @@ fn seeding_a_bigger_world_keeps_it_consistent() {
     assert!(on_grid > 0);
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn two_genome_buffers_change_nothing() {
+    let run = |shard: Option<u32>| {
+        let mut cfg = Config::new(64, 31, None).unwrap();
+        if let Some(s) = shard {
+            cfg.shard_slots = s;
+        }
+        let mut w = World::new(
+            cfg,
+            Pacing {
+                target_ms: 50.0,
+                duty: 1.0,
+            },
+        )
+        .unwrap();
+        for _ in 0..500 {
+            w.step();
+        }
+        w.flush();
+        assert!(w.alive() > 0);
+        fingerprint(&w)
+    };
+    // The split lands inside the slots in use, so cells live on both sides of it.
+    assert_eq!(run(None), run(Some(60)));
+}
+
+#[test]
+fn a_new_cell_starts_with_blank_measurements() {
+    let mut w = still_world(32);
+    let want = budget(&[(REST, 60), (DIR_X, 60)]);
+    let g = fixed_genome(2, want);
+    let womb = w.cfg.f("womb");
+    // Slot 1 will go to the child. Dirty it as a dead cell would have left it.
+    let dirty = [9.0f32; 28];
+    w.gpu
+        .queue
+        .write_buffer(&w.buffers["stat"], 112, bytemuck::cast_slice(&dirty));
+    w.gpu.queue.submit([]);
+    w.gpu.wait();
+    w.plant(20, 20, 8.0, womb + 0.5, 0, &g);
+    w.step();
+    w.flush();
+    let kid = w.read_ranges("stat", &[(112, 112)]);
+    assert!(
+        bytemuck::cast_slice::<u8, f32>(&kid)
+            .iter()
+            .all(|v| v.abs() < 1.0),
+        "child carries the old owner's numbers"
+    );
+}
