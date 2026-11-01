@@ -94,7 +94,7 @@ Decided by Erik on 2026-10-31:
 - **Fixed RNN, not NEAT.** We focus on what scales well on a GPU.
 - **No fitness function.** Energy alone decides who survives and how evolution goes.
 
-The toy in [toy/](toy/) tests the world rules on a small scale.
+The toy in [toy/](toy/) tests the world rules on a small scale. [life/](life/) is the larger CPU test of Erik's goal: one kind of cell, no designed types, with predation, cooperation and species left to emerge.
 
 Still open:
 

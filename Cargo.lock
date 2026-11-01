@@ -200,6 +200,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "auto-life"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "rayon",
+ "serde_json",
+]
+
+[[package]]
 name = "auto-vk"
 version = "0.1.0"
 dependencies = [
