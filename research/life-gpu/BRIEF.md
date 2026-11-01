@@ -65,7 +65,7 @@ Wrong WGSL panics with the compiler's message and a line number in the generated
 
 ## What to measure
 
-Each log line is JSON. Compare with the baseline in `research/life-gpu/exp/base/` at the same size and seed.
+Each log line is JSON. Compare with the baseline in `/home/erikf/auto/research/life-gpu/exp/base/` at the same size and seed. It may not be there yet, since the GPU is shared. If it isn't, run your own control with your rule switched off, which you should do anyway for anything you claim.
 
 | Field | Meaning |
 |---|---|
