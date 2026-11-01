@@ -3,7 +3,7 @@
 # order for up to a turn, then gives the other projects a go.
 spool=/tmp/life-spool
 TURN=${LIFE_TURN_SECONDS:-720}
-JOB_MINUTES=${LIFE_JOB_MINUTES:-5}
+JOB_MINUTES=${LIFE_JOB_MINUTES:-4}
 exec 8>/tmp/auto-gpu.lock
 exec 9>/tmp/cars-gpu.lock
 pending() { ls "$spool/jobs" 2>/dev/null | grep -v '\.pid$' | sort | head -1; }

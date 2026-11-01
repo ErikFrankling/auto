@@ -53,7 +53,7 @@
 
   "vision_steps": 3,
   "compat": 0,
-  "report_tau": 0.2,
+  "report_tau": 0.4,
 
   "meat_flow": 0.01,
   "meat_rot": 0.002,

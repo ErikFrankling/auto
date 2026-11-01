@@ -318,11 +318,16 @@ fn lifestyles(cells: &[Sample], k: usize) -> (Vec<Vec<usize>>, Vec<usize>) {
     (out, label)
 }
 
-/// Share of variation in how cells live that species membership explains.
-/// Near 0 means species are just genetic labels. High means they live differently.
+/// Share of variation in how cells live that species membership explains, counting
+/// only groups of at least 1% of the sample and corrected for the number of groups,
+/// since a group of one cell always "explains" itself. Near 0 means species are just
+/// genetic labels. High means they really live differently.
 fn species_explain_behaviour(cells: &[Sample], gs: &[Vec<usize>]) -> f32 {
-    let members: Vec<usize> = gs.iter().flatten().copied().collect();
-    if members.len() < 10 {
+    let sampled: usize = gs.iter().map(|g| g.len()).sum();
+    let big: Vec<&Vec<usize>> = gs.iter().filter(|g| g.len() * 100 >= sampled).collect();
+    let members: Vec<usize> = big.iter().flat_map(|g| g.iter().copied()).collect();
+    let k = big.len();
+    if k < 2 || members.len() <= k + 1 {
         return 0.0;
     }
     let data: Vec<[f32; 19]> = cells.iter().map(behaviour).collect();
@@ -333,14 +338,14 @@ fn species_explain_behaviour(cells: &[Sample], gs: &[Vec<usize>]) -> f32 {
         }
     }
     let (mut within, mut total) = (0.0f32, 0.0f32);
-    for g in gs {
+    for g in &big {
         let mut gm = [0.0f32; 19];
-        for &i in g {
+        for &i in g.iter() {
             for d in 0..19 {
                 gm[d] += data[i][d] / g.len() as f32;
             }
         }
-        for &i in g {
+        for &i in g.iter() {
             for d in 0..19 {
                 within += (data[i][d] - gm[d]).powi(2);
                 total += (data[i][d] - mean[d]).powi(2);
@@ -348,10 +353,11 @@ fn species_explain_behaviour(cells: &[Sample], gs: &[Vec<usize>]) -> f32 {
         }
     }
     if total <= 0.0 {
-        0.0
-    } else {
-        1.0 - within / total
+        return 0.0;
     }
+    let between = total - within;
+    let per_cell = within / (members.len() - k) as f32;
+    ((between - (k - 1) as f32 * per_cell) / (total + per_cell)).max(0.0)
 }
 
 pub struct Tracker {
@@ -368,7 +374,9 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
         (d(3), d(4), d(5), d(6), d(7), d(8), d(9));
     tracker.last = counters;
     let n = world.alive();
-    let tau = world.cfg.f("report_tau");
+    // Fixed here, so logs from all experiments compare. Genomes drift fast, about 0.03 of
+    // rms weight per generation, so much below this it only finds recent family.
+    let tau = 0.4;
     let size = world.cfg.size;
     let mut out = json!({
         "tick": world.tick,
@@ -392,7 +400,7 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
     out["effective_species"] = json!(round3(entropy_species(&gs)));
     out["species_explain_behaviour"] = json!(round3(species_explain_behaviour(cells, &gs)));
     let mut at = serde_json::Map::new();
-    for t in [0.05f32, 0.1, 0.15, 0.2, 0.3, 0.5] {
+    for t in [0.05f32, 0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 1.0] {
         let g = groups(cells, 800, t);
         at.insert(format!("{t}"), json!(round3(entropy_species(&g))));
     }

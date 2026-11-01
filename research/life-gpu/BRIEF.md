@@ -58,7 +58,7 @@ Wrong WGSL panics with the compiler's message and a line number in the generated
 
 - This GPU also draws Erik's 4K screens, and other projects are using it. Every run goes through one queue, which takes its turn on the GPU and runs several jobs per turn. A wait of 30 to 60 minutes is normal, and giving up early wastes the experiment, so keep waiting. Queue your whole batch at once, one `agent-job` for each run, so they all go in the same turn. Never kill another process and never touch `/tmp/*-gpu.lock`.
 - Go small to big, always: 128 on the software driver until it compiles and runs, then a short 256 on the GPU, then real results at 512, and 1024 only once 512 is doing something worth seeing. Do not go above 1024. Results at 128 are only a check that the code runs, since a world that small can't hold many ways of living, so don't base a verdict on them.
-- Each run is cut off at 5 minutes of GPU time, which at 512 is about 100,000 ticks. To go on longer, `--save` the world and `--load` it in a new run. Aim for about 20 minutes of GPU time in total, and at most 6 runs in the queue at once. Never pass `--force`, and don't raise `--duty` or `--target-ms`.
+- Each run is cut off at 4 minutes of GPU time, which at 512 is roughly 250,000 ticks, ten times anything earlier in this project. Use `--ticks 300000 --log-every 25000`. Worlds differ a lot by seed, so use seeds 1, 2 and 3 where you can. To go on longer, `--save` the world and `--load` it in a new run. Aim for about 20 minutes of GPU time in total, and at most 6 runs in the queue at once. Never pass `--force`, and don't raise `--duty` or `--target-ms`.
 - Software-driver runs: keep them short, and always set `LP_NUM_THREADS=2`.
 - Start long runs with `agent-job run NAME -- CMD` so they survive, and wait with `agent-job attach NAME`. Do not use `&`.
 - Do not run cargo, nix builds, or anything heavy. Don't commit videos. Put them in `/home/erikf/auto/videos/life-gpu/NAME/`.
@@ -70,9 +70,9 @@ Each log line is JSON. Compare with the baseline in `/home/erikf/auto/research/l
 | Field | Meaning |
 |---|---|
 | `cells`, `density`, `births`, `births_mixed`, `deaths` | Population. `deaths` has starved, bitten, burned, old |
-| `effective_species`, `species_at` | Genome groups, at a threshold and at several. If groups only exist at one threshold, they aren't species |
+| `effective_species`, `species_at` | Genome groups at threshold 0.4, and at several. Genomes drift fast, so below about 0.3 this only finds recent family. Numbers that hold steady from 0.3 to 0.7 suggest real species |
 | `genome_gap` | Real weight differences between random pairs |
-| `species_explain_behaviour` | Share of how cells live that species explains. Near 0: species are only labels. High: species really live differently. **This is the number closest to Erik's goal** |
+| `species_explain_behaviour` | Share of how cells live that species explains, counting groups of at least 1% and corrected for how many there are. Near 0: species are only labels. High: species really live differently. **This is the number closest to Erik's goal**, and it needs at least two sizeable groups to be above 0 |
 | `species`, `lifestyles` | Tables of groups by genome, and by behaviour ignoring genes: `lives_on` (ground, meat, bite, gift), `budget`, `moving`, `heads_to_bigger` (negative means fleeing bigger bodies), `heads_to_smaller` (positive means chasing), `heads_to_food`, `follows_scent`, `neighbours`, `age`, `spread`, `bites_on_similar` |
 | `from_other_cells_hist` | How many sampled cells get each tenth of their energy from eating others. Two humps means predators and grazers |
 | `founder_lines` | How many original lineages survive |

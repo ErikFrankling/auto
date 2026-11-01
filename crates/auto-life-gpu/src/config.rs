@@ -60,7 +60,7 @@ impl Config {
         let squares = self.size as u64 * self.size as u64;
         // A single genome buffer is limited to 2 GB here.
         let cap = (2u64 << 30) / (self.blocks() as u64 * 16);
-        (squares / 3).min(cap).max(1024) as u32
+        (squares / 2).min(cap).max(1024) as u32
     }
 
     pub fn vram_bytes(&self) -> u64 {

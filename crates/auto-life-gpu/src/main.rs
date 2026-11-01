@@ -35,7 +35,7 @@ struct Args {
     /// Physics setting, as key=value. Repeat for more.
     #[arg(long = "set")]
     sets: Vec<String>,
-    /// Most cells the world can hold. Defaults to a third of the squares, up to what fits.
+    /// Most cells the world can hold. Defaults to half the squares, up to what fits.
     #[arg(long)]
     slots: Option<u32>,
     #[arg(long, default_value_t = 2)]
