@@ -625,8 +625,7 @@ def separated_species(ana):
         for side, other in ((left, right), (right, left)):
             for k in KIND_NAMES:
                 in_side = sum(1 for p in side if p[2] == k)
-                in_other = sum(1 for p in other if p[2] == k)
-                if in_side >= 30 and in_side / len(side) > 0.8 and in_other / max(in_side + in_other, 1) < 0.25:
+                if in_side >= 30 and in_side / len(side) > 0.8:
                     found.append((n, k))
     return found
 
@@ -649,7 +648,7 @@ def findings(worlds, ana, is_v2):
         parts = ", ".join(f"{g[k]['share'] / counted * 100:.0f}% {KIND_NAMES[k].lower()}" for k in kinds)
         items.append(f"<b>Different ways of life live side by side.</b> One world holds {parts}, and the maps show they occupy different places.")
     for n, k in separated_species(ana)[:2]:
-        items.append(f"<b>A species with its own way of life.</b> In seed {n}, most {KIND_NAMES[k].lower()} sit in their own genome cloud, apart from the other groups. See the genome map below.")
+        items.append(f"<b>A species with its own way of life.</b> In seed {n}, a whole genome cloud is almost entirely {KIND_NAMES[k].lower()}, set apart from the other groups. See the genome map below.")
     items.append("<b>Colonies hold territory.</b> Different genomes keep separate ground with sharp borders, and you can see it directly in the genome-coloured views.")
     items.append("<b>Scared hasn't evolved.</b> Cells steer away from bodies in general, but treat bigger and smaller ones about the same, so there's no real fleeing or chasing yet. Hunters mostly sit and bite what's next to them.")
     items.append("<b>Scent, gifts and heat are barely used.</b> Each takes under about 1% of spending in baseline, and scent following is weak. Giving cells a feature doesn't mean evolution picks it up.")
