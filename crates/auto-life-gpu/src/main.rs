@@ -143,7 +143,10 @@ fn run(args: Args) -> Result<(), String> {
         cfg,
         Pacing {
             target_ms: args.target_ms,
-            duty: args.duty,
+            duty: std::env::var("LIFE_DUTY")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(args.duty),
         },
     )?;
     eprintln!(
