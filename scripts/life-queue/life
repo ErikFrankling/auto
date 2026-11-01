@@ -2,7 +2,7 @@
 # Queues a run for the one GPU runner and waits for it. Same flags as the binary.
 # Each lock turn runs many jobs, so nobody waits behind the other projects once per run.
 spool=/tmp/life-spool
-id=$(date +%s%N)-$$
+id=${LIFE_PRIORITY:+0-}$(date +%s%N)-$$
 log=$spool/logs/$id.log
 : > "$log"
 {
