@@ -116,7 +116,10 @@ pub struct World {
     frames: wgpu::Buffer,
     stride: usize,
     pending: Vec<Op>,
-    ops_per_submit: usize,
+    // Cheap and expensive work never share a submission on a big world, so each kind
+    // has its own size. Small worlds use one size and batch many ticks together.
+    ops_per_submit: [usize; 2],
+    pending_kind: usize,
     act_splits: u32,
     sweep_splits: u32,
     rng: u64,
@@ -347,7 +350,8 @@ impl World {
             stride,
             pending: vec![],
             // Start cautious on big worlds. The pacing loop finds the right size from here.
-            ops_per_submit: if size_now >= 1024 { 1 } else { 8 },
+            ops_per_submit: if size_now >= 1024 { [1, 1] } else { [8, 8] },
+            pending_kind: 0,
             act_splits: (size_now / 4096).max(1),
             sweep_splits: (size_now / 1024).max(1),
             rng,
@@ -630,8 +634,19 @@ impl World {
     }
 
     fn push(&mut self, op: Op) {
+        // Sweeps and the snapshot copy touch every square. Cell passes touch only cells.
+        let kind = match op {
+            _ if self.cfg.size < 2048 => 0,
+            Op::CopySeen { .. } => 1,
+            Op::Dispatch { pipe, .. } if pipe == P_SWEEP => 1,
+            _ => 0,
+        };
+        if kind != self.pending_kind {
+            self.flush();
+            self.pending_kind = kind;
+        }
         self.pending.push(op);
-        if self.pending.len() >= self.ops_per_submit {
+        if self.pending.len() >= self.ops_per_submit[kind] {
             self.flush();
         }
     }
@@ -713,15 +728,17 @@ impl World {
         }
 
         let target = self.pacing.target_ms;
+        let kind = self.pending_kind;
         if ms > target * 1.25 {
-            if self.ops_per_submit > 1 {
-                self.ops_per_submit = (self.ops_per_submit / 2).max(1);
-            } else {
+            if self.ops_per_submit[kind] > 1 {
+                self.ops_per_submit[kind] = (self.ops_per_submit[kind] / 2).max(1);
+            } else if kind == 0 {
                 self.act_splits = (self.act_splits * 2).min(self.cfg.size / 4);
+            } else {
                 self.sweep_splits = (self.sweep_splits * 2).min(self.cfg.size / 2);
             }
         } else if ms < target * 0.4 {
-            self.ops_per_submit = (self.ops_per_submit * 2).min(RING_ENTRIES / 2);
+            self.ops_per_submit[kind] = (self.ops_per_submit[kind] * 2).min(RING_ENTRIES / 2);
         }
         if self.pacing.duty < 1.0 {
             let rest = ms * (1.0 / self.pacing.duty.max(0.05) - 1.0);
