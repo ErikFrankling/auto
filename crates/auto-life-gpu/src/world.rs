@@ -325,6 +325,7 @@ impl World {
         )?;
 
         let rng = cfg.seed as u64 ^ 0xA5A5_5A5A_1234_5678;
+        let size_now = cfg.size;
         let mut w = World {
             gpu,
             sun_k: 0.0,
@@ -341,9 +342,10 @@ impl World {
             frames,
             stride,
             pending: vec![],
-            ops_per_submit: 32,
-            act_splits: 1,
-            sweep_splits: 1,
+            // Start cautious on big worlds. The pacing loop finds the right size from here.
+            ops_per_submit: if size_now >= 1024 { 1 } else { 8 },
+            act_splits: (size_now / 4096).max(1),
+            sweep_splits: (size_now / 1024).max(1),
             rng,
             bake_pipe,
             bake_layout,
@@ -1112,5 +1114,241 @@ impl World {
         let m = self.cfg.hidden_rows as u64 * 16;
         let b = self.read_ranges("mem", &[(slot as u64 * m, m)]);
         bytemuck::cast_slice::<u8, f32>(&b).to_vec()
+    }
+}
+
+/// A saved world's buffers, in file order, with their sizes.
+fn saved_layout(size: u64, slots: u64, hidden_rows: u64) -> Vec<(&'static str, u64)> {
+    let squares = size * size;
+    let blocks = hidden_rows
+        * (crate::config::IN_BLOCKS as u64 + hidden_rows + crate::config::OUT_ROWS as u64);
+    SAVED
+        .iter()
+        .map(|name| {
+            let bytes = match *name {
+                "occ" | "seen" | "seen_next" | "terrain" => squares * 4,
+                "fa" | "fb" | "fc" => squares * 16,
+                "cell" => slots * CELL_BYTES,
+                "stat" => slots * STAT_BYTES,
+                "sketch" | "jobs" => slots * 16,
+                "mem" => slots * hidden_rows * 16,
+                "genome" => slots * blocks * 16,
+                "ring" => (slots as u32).next_power_of_two() as u64 * 4,
+                "ctr" => 32 * 4,
+                "ctl" => 8 * 4,
+                _ => unreachable!(),
+            };
+            (*name, bytes)
+        })
+        .collect()
+}
+
+impl World {
+    /// Copies the living cells of saved smaller worlds into this fresh world, as a
+    /// grid of tiles. Neighbouring tiles come from different files, so populations
+    /// that evolved apart meet at the borders. Returns how many cells were planted.
+    pub fn seed_from(&mut self, paths: &[String], keep: f64) -> Result<u64, String> {
+        use std::io::{Read, Seek, SeekFrom};
+        self.flush();
+        let size = self.cfg.size as u64;
+        let hr = self.cfg.hidden_rows as u64;
+        let blocks = self.cfg.blocks() as u64;
+        let genome_bytes = (blocks * 16) as usize;
+        let mem_bytes = (hr * 16) as usize;
+        let mut occ = self.read_u32s("occ");
+
+        struct Source {
+            file: std::fs::File,
+            occ: Vec<u32>,
+            cell: Vec<u8>,
+            sketch: Vec<u8>,
+            mem_at: u64,
+            genome_at: u64,
+            size: u64,
+        }
+        let mut sources = vec![];
+        for path in paths {
+            let mut f = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+            let mut len = [0u8; 8];
+            f.read_exact(&mut len).map_err(|e| e.to_string())?;
+            let mut head = vec![0u8; u64::from_le_bytes(len) as usize];
+            f.read_exact(&mut head).map_err(|e| e.to_string())?;
+            let head: serde_json::Value =
+                serde_json::from_slice(&head).map_err(|e| e.to_string())?;
+            let (src, slots, src_hr) = (
+                head["size"].as_u64().unwrap_or(0),
+                head["slots"].as_u64().unwrap_or(0),
+                head["hidden_rows"].as_u64().unwrap_or(0),
+            );
+            if src_hr != hr || src == 0 || src > size || !src.is_power_of_two() {
+                return Err(format!(
+                    "{path}: a world {src} wide with {src_hr} rows of memory can't seed this one"
+                ));
+            }
+            let mut at = 8 + u64::from_le_bytes(len);
+            let mut offsets = std::collections::HashMap::new();
+            for (name, bytes) in saved_layout(src, slots, hr) {
+                offsets.insert(name, (at, bytes));
+                at += bytes;
+            }
+            let mut section = |name: &str| -> Result<Vec<u8>, String> {
+                let (from, bytes) = offsets[name];
+                f.seek(SeekFrom::Start(from)).map_err(|e| e.to_string())?;
+                let mut v = vec![0u8; bytes as usize];
+                f.read_exact(&mut v).map_err(|e| e.to_string())?;
+                Ok(v)
+            };
+            let occ_bytes = section("occ")?;
+            let cell = section("cell")?;
+            let sketch = section("sketch")?;
+            sources.push(Source {
+                occ: bytemuck::pod_collect_to_vec(&occ_bytes),
+                cell,
+                sketch,
+                mem_at: offsets["mem"].0,
+                genome_at: offsets["genome"].0,
+                file: f,
+                size: src,
+            });
+        }
+        let src_size = sources
+            .first()
+            .map(|s| s.size)
+            .ok_or("no worlds to seed from")?;
+        if sources.iter().any(|s| s.size != src_size) {
+            return Err("seed worlds must all be the same size".into());
+        }
+        let per_side = size / src_size;
+        let log = self.cfg.size.trailing_zeros();
+        let mut slot = self.counters()[1] as u64;
+        let first_slot = slot;
+        let max_slots = self.cfg.slots as u64;
+        // Filled, then written in chunks, so memory stays small.
+        const CHUNK: usize = 16384;
+        let (mut cells, mut sketches, mut mems, mut genomes) = (vec![], vec![], vec![], vec![]);
+        let mut chunk_start = slot;
+        let mut rng = (self.cfg.seed as u64) ^ 0x7777_1234;
+        'outer: for ty in 0..per_side {
+            for tx in 0..per_side {
+                let which = ((tx + ty) % sources.len() as u64) as usize;
+                let source = &mut sources[which];
+                for sy in 0..src_size {
+                    for sx in 0..src_size {
+                        let o = source.occ[(sy * src_size + sx) as usize];
+                        if o == 0 || o == u32::MAX {
+                            continue;
+                        }
+                        let s = (o - 1) as u64;
+                        let p = (((sy + ty * src_size) << log) | (sx + tx * src_size)) as usize;
+                        if occ[p] != 0 {
+                            continue;
+                        }
+                        if keep < 1.0 && (next_u64(&mut rng) as f64 / u64::MAX as f64) >= keep {
+                            continue;
+                        }
+                        if slot >= max_slots {
+                            break 'outer;
+                        }
+                        let mut rec: [u32; 16] = bytemuck::pod_read_unaligned(
+                            &source.cell[s as usize * 64..(s as usize + 1) * 64],
+                        );
+                        rec[10] = p as u32;
+                        rec[15] = 0;
+                        cells.extend_from_slice(bytemuck::cast_slice(&rec));
+                        sketches.extend_from_slice(
+                            &source.sketch[s as usize * 16..(s as usize + 1) * 16],
+                        );
+                        let at_mem = mems.len();
+                        mems.resize(at_mem + mem_bytes, 0u8);
+                        source
+                            .file
+                            .seek(SeekFrom::Start(source.mem_at + s * mem_bytes as u64))
+                            .map_err(|e| e.to_string())?;
+                        source
+                            .file
+                            .read_exact(&mut mems[at_mem..])
+                            .map_err(|e| e.to_string())?;
+                        let at_gen = genomes.len();
+                        genomes.resize(at_gen + genome_bytes, 0u8);
+                        source
+                            .file
+                            .seek(SeekFrom::Start(source.genome_at + s * genome_bytes as u64))
+                            .map_err(|e| e.to_string())?;
+                        source
+                            .file
+                            .read_exact(&mut genomes[at_gen..])
+                            .map_err(|e| e.to_string())?;
+                        occ[p] = slot as u32 + 1;
+                        slot += 1;
+                        if (slot - chunk_start) as usize >= CHUNK {
+                            self.write_slots(chunk_start, &cells, &sketches, &mems, &genomes);
+                            cells.clear();
+                            sketches.clear();
+                            mems.clear();
+                            genomes.clear();
+                            chunk_start = slot;
+                        }
+                    }
+                }
+            }
+        }
+        self.write_slots(chunk_start, &cells, &sketches, &mems, &genomes);
+
+        // Rock stays rock, and cells get a plain body word until they first act.
+        let mut at = 0usize;
+        let chunk_words = 8 << 20;
+        while at < occ.len() {
+            let end = (at + chunk_words).min(occ.len());
+            let part = &occ[at..end];
+            let seen: Vec<u32> = part
+                .iter()
+                .map(|o| match *o {
+                    0 => 0,
+                    u32::MAX => 1,
+                    _ => 0x80,
+                })
+                .collect();
+            let q = &self.gpu.queue;
+            q.write_buffer(
+                &self.buffers["occ"],
+                at as u64 * 4,
+                bytemuck::cast_slice(part),
+            );
+            q.write_buffer(
+                &self.buffers["seen"],
+                at as u64 * 4,
+                bytemuck::cast_slice(&seen),
+            );
+            q.write_buffer(
+                &self.buffers["seen_next"],
+                at as u64 * 4,
+                bytemuck::cast_slice(&seen),
+            );
+            q.submit([]);
+            self.gpu.wait();
+            at = end;
+        }
+        let tail = slot as u32;
+        self.gpu
+            .queue
+            .write_buffer(&self.buffers["ctr"], 4, bytemuck::bytes_of(&tail));
+        self.gpu.queue.submit([]);
+        self.gpu.wait();
+        Ok(slot - first_slot)
+    }
+
+    fn write_slots(&self, start: u64, cells: &[u8], sketches: &[u8], mems: &[u8], genomes: &[u8]) {
+        if cells.is_empty() {
+            return;
+        }
+        let hr = self.cfg.hidden_rows as u64;
+        let blocks = self.cfg.blocks() as u64;
+        let q = &self.gpu.queue;
+        q.write_buffer(&self.buffers["cell"], start * CELL_BYTES, cells);
+        q.write_buffer(&self.buffers["sketch"], start * 16, sketches);
+        q.write_buffer(&self.buffers["mem"], start * hr * 16, mems);
+        q.write_buffer(&self.buffers["genome"], start * blocks * 16, genomes);
+        q.submit([]);
+        self.gpu.wait();
     }
 }

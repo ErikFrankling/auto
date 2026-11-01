@@ -596,3 +596,69 @@ fn a_child_mixes_whole_units_from_two_parents() {
         }
     }
 }
+
+#[test]
+fn a_saved_world_continues_the_same() {
+    let dir = std::env::temp_dir().join(format!("life-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("world.bin").to_string_lossy().to_string();
+    let mut a = world_with(64, 21, &[]);
+    for _ in 0..200 {
+        a.step();
+    }
+    a.save(&path).unwrap();
+    for _ in 0..100 {
+        a.step();
+    }
+    a.flush();
+    let want = fingerprint(&a);
+    drop(a);
+    let mut b = world_with(64, 21, &[]);
+    b.load(&path).unwrap();
+    for _ in 0..100 {
+        b.step();
+    }
+    b.flush();
+    assert_eq!(fingerprint(&b), want);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn seeding_a_bigger_world_keeps_it_consistent() {
+    let dir = std::env::temp_dir().join(format!("life-seed-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("small.bin").to_string_lossy().to_string();
+    let mut small = world_with(64, 4, &[]);
+    for _ in 0..1500 {
+        small.step();
+    }
+    small.save(&path).unwrap();
+    let small_alive = small.alive();
+    assert!(small_alive > 0);
+    drop(small);
+    let mut big = world_with(128, 8, &[]);
+    let planted = big.seed_from(&[path], 1.0).unwrap();
+    // Four tiles, less whatever landed on rock.
+    assert!(
+        planted > small_alive as u64 * 3,
+        "planted {planted} from {small_alive}"
+    );
+    assert!(planted <= small_alive as u64 * 4);
+    assert_eq!(big.alive() as u64, planted);
+    for _ in 0..100 {
+        big.step();
+    }
+    big.flush();
+    let occ = big.read_u32s("occ");
+    let cells = big.read_cells();
+    let mut on_grid = 0;
+    for (p, o) in occ.iter().enumerate() {
+        if *o != 0 && *o != ROCK {
+            on_grid += 1;
+            assert_eq!(cells[*o as usize - 1][10] as usize, p);
+        }
+    }
+    assert_eq!(on_grid as u32, big.alive());
+    assert!(on_grid > 0);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

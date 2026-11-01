@@ -79,6 +79,19 @@ struct Args {
     /// Start from a saved world instead of an empty one.
     #[arg(long)]
     load: Option<String>,
+    /// Comma list of saved smaller worlds. Their living cells are copied in as tiles, so a
+    /// giant world starts with evolved life and different populations meet at the borders.
+    #[arg(long)]
+    seed_from: Option<String>,
+    /// Share of those cells to keep.
+    #[arg(long, default_value_t = 1.0)]
+    seed_keep: f64,
+    /// Write the whole world, one pixel per square, to this PNG when the run ends.
+    #[arg(long)]
+    snapshot: Option<String>,
+    /// Also write one every this many ticks, with the tick in its name.
+    #[arg(long, default_value_t = 0)]
+    snapshot_every: u64,
 }
 
 fn main() {
@@ -138,6 +151,14 @@ fn run(args: Args) -> Result<(), String> {
         world.load(path)?;
         eprintln!("loaded {path} at tick {}", world.tick);
     }
+    if let Some(list) = &args.seed_from {
+        let paths: Vec<String> = list.split(',').map(str::to_string).collect();
+        let planted = world.seed_from(&paths, args.seed_keep)?;
+        eprintln!(
+            "planted {planted} evolved cells from {} worlds",
+            paths.len()
+        );
+    }
 
     let mut log: Box<dyn Write> = match &args.out {
         Some(p) => {
@@ -173,6 +194,7 @@ fn run(args: Args) -> Result<(), String> {
                     args.size
                 ),
                 threads: 2,
+                still: false,
             },
         )?),
         None => None,
@@ -191,6 +213,16 @@ fn run(args: Args) -> Result<(), String> {
             && t % args.frame_every == 0
         {
             rec.frame(&mut world);
+        }
+        if let Some(path) = &args.snapshot
+            && args.snapshot_every > 0
+            && t % args.snapshot_every == 0
+        {
+            let name = match path.strip_suffix(".png") {
+                Some(stem) => format!("{stem}-{}.png", world.tick),
+                None => format!("{path}-{}.png", world.tick),
+            };
+            snapshot(&mut world, &name)?;
         }
         if held_since.elapsed().as_secs_f64() > args.hold_minutes * 60.0 {
             world.flush();
@@ -241,14 +273,40 @@ fn run(args: Args) -> Result<(), String> {
             break;
         }
     }
-    drop(lock);
     if let Some(rec) = recorder {
         rec.finish();
     }
+    if let Some(path) = &args.snapshot {
+        snapshot(&mut world, path)?;
+    }
     if let Some(path) = &args.save {
-        let _lock = lock_gpu();
         world.save(path)?;
         eprintln!("saved {path}");
     }
+    drop(lock);
+    Ok(())
+}
+
+/// The whole world at one pixel per square, for zooming into later.
+fn snapshot(world: &mut World, path: &str) -> Result<(), String> {
+    let size = world.cfg.size;
+    let mut rec = Recorder::new(
+        world,
+        path,
+        RecorderOptions {
+            width: size,
+            height: size,
+            fps: 1,
+            layout: Layout::Genome,
+            zoom: 0.0,
+            seconds_per_shot: 1.0,
+            label: String::new(),
+            threads: 2,
+            still: true,
+        },
+    )?;
+    rec.frame(world);
+    rec.finish();
+    eprintln!("wrote {path}");
     Ok(())
 }

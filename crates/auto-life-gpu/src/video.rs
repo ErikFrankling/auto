@@ -23,6 +23,8 @@ pub struct RecorderOptions {
     pub seconds_per_shot: f32,
     pub label: String,
     pub threads: u32,
+    /// One PNG with no caption, instead of a video.
+    pub still: bool,
 }
 
 struct Camera {
@@ -138,23 +140,37 @@ impl Recorder {
         let filter = format!(
             "drawbox=x=0:y=ih-36:w=iw:h=36:color=black@0.55:t=fill,drawtext=font='{font}':text='{label}':x=14:y=h-26:fontsize=18:fontcolor=white"
         );
-        let mut ffmpeg = Command::new("ffmpeg")
+        let mut command = Command::new("ffmpeg");
+        command
             .args([
                 "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s",
             ])
             .arg(format!("{w}x{h}"))
-            .args(["-r", &opts.fps.to_string(), "-i", "-", "-vf", &filter])
-            .args([
-                "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-            ])
-            .args([
+            .args(["-r", &opts.fps.to_string(), "-i", "-"]);
+        if opts.still {
+            command.args([
+                "-frames:v",
+                "1",
+                "-update",
+                "1",
                 "-threads",
                 &opts.threads.to_string(),
-                "-crf",
-                "22",
-                "-movflags",
-                "+faststart",
-            ])
+            ]);
+        } else {
+            command
+                .args([
+                    "-vf", &filter, "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+                ])
+                .args([
+                    "-threads",
+                    &opts.threads.to_string(),
+                    "-crf",
+                    "22",
+                    "-movflags",
+                    "+faststart",
+                ]);
+        }
+        let mut ffmpeg = command
             .arg(path)
             .stdin(Stdio::piped())
             .spawn()
