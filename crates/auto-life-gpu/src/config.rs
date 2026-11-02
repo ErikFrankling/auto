@@ -9,8 +9,8 @@ use std::path::PathBuf;
 /// in blocks of four, because the GPU does best with 4x4 weight blocks.
 ///
 /// Inputs 0-11 are the senses every cell has. 12 is waste, 13 tracks, 14 practice and how a
-/// place feels, and 15-17 are free. Outputs 0-5 are as act.wgsl describes, and 6 is free:
-/// it holds the spare budget actions x0 to x3. Weights exist for all of them, but
+/// place feels, 15 coats, 16 mineral, 17 bites seen. Outputs 0-5 are as act.wgsl describes,
+/// and 6 holds the spare budget actions x0 to x3. Weights exist for all of them, but
 /// [`Config::input_live`] and [`Config::output_live`] leave out what no rule that is on uses.
 pub const IN_BLOCKS: u32 = 18;
 pub const OUT_ROWS: u32 = 7;
@@ -238,7 +238,9 @@ impl Config {
                 (self.b("skill_on") && self.b("skill_sense"))
                     || (self.b("biomes_on") && self.b("biome_feel"))
             }
-            15..=17 => false,
+            15 => self.b("coat_on") && self.b("coat_sense"),
+            16 => self.b("mineral_on"),
+            17 => self.b("gang_on") && self.b("gang_sense"),
             _ => true,
         }
     }
@@ -246,7 +248,7 @@ impl Config {
     /// Whether a brain output row is read by anything in this world.
     pub fn output_live(&self, row: u32) -> bool {
         match row {
-            6 => ["x0_on", "x1_on", "x2_on", "x3_on"]
+            6 => ["x0_on", "x1_on", "x2_on", "x3_on", "mineral_on", "birth_choice"]
                 .iter()
                 .any(|k| self.b(k)),
             _ => true,

@@ -173,6 +173,38 @@
   "track_decay": 0.002,
   "roads_stats": 0,
 
+  "gang_on": false,
+  "gang_sharp": 2,
+  "gang_effort": 0.02,
+  "gang_sense": false,
+
+  "coat_on": false,
+  "coat_sense": false,
+  "coat_rate": 0.002,
+  "coat_cost": 2,
+  "coat_sharp": 8,
+  "coat_floor": 0.05,
+  "coat_span": 0.5,
+
+  "mineral_on": false,
+  "mineral_start": 0.5,
+  "mineral_birth": 1,
+  "mineral_rate": 6,
+  "mineral_cap": 8,
+  "mineral_give": 4,
+  "mineral_flow": 0.02,
+  "mineral_contrast": 1.5,
+  "mineral_anti": 0.5,
+
+  "birth_choice": false,
+  "birth_min": 1.5,
+  "womb_cap": 40,
+  "age_metabolic": false,
+  "age_rest": 0.05,
+
+  "depth_stats": true,
+  "trail_stats": false,
+
   "ledger": false,
   "ledger_scale": 4096
 }

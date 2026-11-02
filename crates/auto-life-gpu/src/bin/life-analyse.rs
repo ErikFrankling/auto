@@ -6,6 +6,7 @@
 //! same set of situations and see what it actually does. Different genomes that act the
 //! same are one strategy, whatever their weights look like.
 
+use auto_life_gpu::measure::{self, Rules};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -16,19 +17,29 @@ const OUT_ROWS: usize = auto_life_gpu::config::OUT_ROWS as usize;
 const CELL_WORDS: usize = auto_life_gpu::config::CELL_WORDS;
 const STAT_WORDS: usize = auto_life_gpu::config::STAT_WORDS;
 const SUN_RANGE: f32 = 8.0;
-const ACTIONS: [&str; 12] = [
-    "rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme", "armour", "clean",
+const N_ACTIONS: usize = 13;
+const ACTIONS: [&str; N_ACTIONS] = [
+    "rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme", "armour", "clean", "uptake",
 ];
-/// Whether the armour and clean actions exist in this world. Set once, from the save.
-static RULE_ACTIONS: std::sync::OnceLock<[bool; 2]> = std::sync::OnceLock::new();
+/// Which rules are on in this world. Set once, from the save.
+static RULES: std::sync::OnceLock<Rules> = std::sync::OnceLock::new();
+
+fn rules() -> Rules {
+    RULES.get().copied().unwrap_or_default()
+}
 
 /// One tick's budget shares, as the shader splits them. Actions that are off get nothing.
-fn split_budget(raw: &[f32; 12]) -> [f32; 12] {
-    let on = RULE_ACTIONS.get().copied().unwrap_or([false; 2]);
-    let top = raw.iter().cloned().fold(f32::MIN, f32::max);
-    let mut s = [0.0f32; 12];
+fn split_budget(raw: &[f32; N_ACTIONS]) -> [f32; N_ACTIONS] {
+    let on = rules().actions();
+    let top = raw
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i < 12 || on[2])
+        .map(|(_, v)| *v)
+        .fold(f32::MIN, f32::max);
+    let mut s = [0.0f32; N_ACTIONS];
     let mut z = 0.0;
-    for i in 0..12 {
+    for i in 0..N_ACTIONS {
         if i < 10 || on[i - 10] {
             s[i] = (raw[i] - top).clamp(-20.0, 0.0).exp();
             z += s[i];
@@ -76,7 +87,7 @@ struct Save {
     shard: u64,
     occ: Vec<u32>,
     terrain: Vec<u32>,
-    fa: Vec<[f32; 4]>,
+    fd: Vec<[f32; 4]>,
     cell: Vec<[u32; CELL_WORDS]>,
     stat: Vec<[f32; STAT_WORDS]>,
 }
@@ -100,8 +111,7 @@ fn open(path: &str) -> Save {
         eprintln!("{why}");
         std::process::exit(2);
     }
-    let on = |k: &str| head["physics"][k].as_bool().unwrap_or(false);
-    let _ = RULE_ACTIONS.set([on("armour_on"), on("waste_on") && on("waste_clean")]);
+    let _ = RULES.set(Rules::from_physics(&head["physics"]));
     let size = head["size"].as_u64().unwrap() as usize;
     let slots = head["slots"].as_u64().unwrap() as usize;
     let hr = head["hidden_rows"].as_u64().unwrap() as usize;
@@ -141,7 +151,7 @@ fn open(path: &str) -> Save {
     let get = |k: &str| sections[k];
     let occ = read_vec(&mut f, get("occ").0, get("occ").1);
     let terrain = read_vec(&mut f, get("terrain").0, get("terrain").1);
-    let fa = read_vec(&mut f, get("fa").0, get("fa").1);
+    let fd = read_vec(&mut f, get("fd").0, get("fd").1);
     let cell = read_vec(&mut f, get("cell").0, get("cell").1);
     let stat = read_vec(&mut f, get("stat").0, get("stat").1);
     Save {
@@ -157,7 +167,7 @@ fn open(path: &str) -> Save {
         shard,
         occ,
         terrain,
-        fa,
+        fd,
         cell,
         stat,
         file: f,
@@ -477,7 +487,25 @@ fn economy(w: &Save) -> Value {
     let run_sd = (runs.iter().map(|v| (v - mean_run).powi(2)).sum::<f32>() / runs.len().max(1) as f32).sqrt();
     let col_sizes: Vec<usize> = colonies.iter().map(|c| c.0).collect();
     let rich_sizes: Vec<usize> = rich_patches.iter().map(|c| c.0).collect();
+    // Colony sizes, measured the same way as the history, and how much terrain explains them.
+    let found = measure::colonies(&|p| w.occ[p] != 0 && w.occ[p] != NONE, size, 30);
+    let (mut sum_log_sun, mut count_sq) = (vec![0f64; found.found.len()], vec![0f64; found.found.len()]);
+    for p in 0..n {
+        let l = found.label[p] as usize;
+        if l != 0 {
+            sum_log_sun[l - 1] += (w.sun(p).max(1e-4) as f64).log10();
+            count_sq[l - 1] += 1.0;
+        }
+    }
+    let xs: Vec<f64> = (0..found.found.len()).map(|i| sum_log_sun[i] / count_sq[i].max(1.0)).collect();
+    let ys: Vec<f64> = found.found.iter().map(|c| (c.0 as f64).log10()).collect();
+    let colony_sizes = measure::size_stats(&found.found.iter().map(|c| c.0).collect::<Vec<_>>(), 30.0);
+    let mineral = mineral_land(w);
     json!({
+        // Near 1: colonies are this size because of the land they sit on. Near 0: free of it.
+        "colony_size_explained_by_sun": round3(r_squared(&xs, &ys)),
+        "colony_sizes": colony_sizes,
+        "mineral_land": mineral,
         "mean_sun": round5(mean_sun),
         "sun_per_tick": sun_total,
         "open": open,
@@ -493,6 +521,92 @@ fn economy(w: &Save) -> Value {
         "grid": {"sun_top_1pct": grid(&top), "colony_centres": grid(&centres), "rich_patch_centres": grid(&rich_centres)},
         "sun_autocorrelation": auto,
         "walk_to_wall": {"p10": percentile(&runs, 0.1), "p50": percentile(&runs, 0.5), "p90": percentile(&runs, 0.9), "cv": round3(run_sd / mean_run.max(1e-6))},
+    })
+}
+
+fn r_squared(x: &[f64], y: &[f64]) -> f32 {
+    let n = x.len() as f64;
+    if x.len() < 3 {
+        return 0.0;
+    }
+    let (mx, my) = (x.iter().sum::<f64>() / n, y.iter().sum::<f64>() / n);
+    let (mut xx, mut yy, mut xy) = (0.0, 0.0, 0.0);
+    for (a, b) in x.iter().zip(y) {
+        xx += (a - mx) * (a - mx);
+        yy += (b - my) * (b - my);
+        xy += (a - mx) * (b - my);
+    }
+    if xx <= 0.0 || yy <= 0.0 {
+        return 0.0;
+    }
+    (xy * xy / xx / yy) as f32
+}
+
+/// Land rent, once there are two things land can be good for. Thirds of sun against thirds of
+/// mineral richness: who lives where, and how. If mineral matters, rows and columns both change.
+fn mineral_land(w: &Save) -> Value {
+    if !rules().mineral {
+        return Value::Null;
+    }
+    let n = w.size * w.size;
+    let open: Vec<usize> = (0..n).filter(|p| !w.rock(*p)).collect();
+    let cuts = |value: &dyn Fn(usize) -> f32| -> (f32, f32) {
+        let mut v: Vec<f32> = open.iter().map(|p| value(*p)).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        (percentile(&v, 1.0 / 3.0), percentile(&v, 2.0 / 3.0))
+    };
+    let (s1, s2) = cuts(&|p| w.sun(p));
+    let (m1, m2) = cuts(&|p| w.fd[p][2]);
+    let third = |v: f32, a: f32, b: f32| if v < a { 0 } else if v < b { 1 } else { 2 };
+    let mut squares = [[0f64; 3]; 3];
+    let mut occupied = [[0f64; 3]; 3];
+    let mut ground = [[0f64; 3]; 3];
+    let mut store = [[0f64; 3]; 3];
+    let mut moving = [[0f64; 3]; 3];
+    let mut uptake = [[0f64; 3]; 3];
+    let mut other = [[0f64; 3]; 3];
+    for p in &open {
+        let (s, m) = (third(w.sun(*p), s1, s2), third(w.fd[*p][2], m1, m2));
+        squares[s][m] += 1.0;
+        ground[s][m] += w.fd[*p][1] as f64;
+        let o = w.occ[*p];
+        if o != 0 && o != NONE {
+            let c = &w.cell[o as usize - 1];
+            let st = &w.stat[o as usize - 1];
+            occupied[s][m] += 1.0;
+            store[s][m] += f32::from_bits(c[20]) as f64;
+            moving[s][m] += st[19] as f64;
+            uptake[s][m] += st[28] as f64;
+            let total = (st[0] + st[1] + st[2] + st[3]).max(1e-6);
+            other[s][m] += ((st[1] + st[2]) / total) as f64;
+        }
+    }
+    let mut rows = vec![];
+    let names = ["low", "mid", "high"];
+    for s in 0..3 {
+        for m in 0..3 {
+            let c = occupied[s][m].max(1.0);
+            rows.push(json!({
+                "sun": names[s], "mineral": names[m],
+                "occupied": round3((occupied[s][m] / squares[s][m].max(1.0)) as f32),
+                "ground_mineral": round3((ground[s][m] / squares[s][m].max(1.0)) as f32),
+                "store": round3((store[s][m] / c) as f32),
+                "moving": round3((moving[s][m] / c) as f32),
+                "uptake": round3((uptake[s][m] / c) as f32),
+                "from_others": round3((other[s][m] / c) as f32),
+            }));
+        }
+    }
+    let total_ground: f64 = open.iter().map(|p| w.fd[*p][1] as f64).sum();
+    let live = || w.occ.iter().filter(|o| **o != 0 && **o != NONE).map(|o| &w.cell[*o as usize - 1]);
+    let free: f64 = live().map(|c| f32::from_bits(c[20]) as f64).sum();
+    let bound: f64 = live().map(|c| f32::from_bits(c[22]) as f64).sum();
+    let start = w.physics["mineral_start"].as_f64().unwrap_or(0.0);
+    let birth = w.physics["mineral_birth"].as_f64().unwrap_or(1.0);
+    json!({
+        "table": rows,
+        "on_ground": total_ground, "free_in_cells": free, "bound_in_cells": bound,
+        "density_cap": round3((start / birth.max(1e-6)) as f32),
     })
 }
 
@@ -550,18 +664,27 @@ fn think(g: &[f32], hr: usize, input: &Inputs, mem: &mut [[f32; 4]]) -> [[f32; 4
     out
 }
 
-/// Budget shares, heading and willingness in a situation, from a blank memory after a few ticks.
-fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 12], f32, f32) {
+fn raw_budget(o: &[[f32; 4]; OUT_ROWS]) -> [f32; N_ACTIONS] {
+    [
+        o[0][0], o[0][1], o[0][2], o[0][3], o[1][0], o[1][1], o[1][2], o[1][3], o[2][0], o[2][1], o[2][2], o[2][3],
+        o[6][0],
+    ]
+}
+
+/// All the outputs in a situation, from a blank memory after a few ticks.
+fn settle(g: &[f32], hr: usize, input: &Inputs) -> [[f32; 4]; OUT_ROWS] {
     let mut mem = vec![[0.0f32; 4]; hr];
     let mut out = [[0.0f32; 4]; OUT_ROWS];
     for _ in 0..3 {
         out = think(g, hr, input, &mut mem);
     }
-    let raw = [
-        out[0][0], out[0][1], out[0][2], out[0][3], out[1][0], out[1][1], out[1][2], out[1][3], out[2][0], out[2][1],
-        out[2][2], out[2][3],
-    ];
-    (split_budget(&raw), out[3][0], out[3][1])
+    out
+}
+
+/// Budget shares, heading and willingness in a situation.
+fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; N_ACTIONS], f32, f32) {
+    let out = settle(g, hr, input);
+    (split_budget(&raw_budget(&out)), out[3][0], out[3][1])
 }
 
 fn sat(v: f32, s: f32) -> f32 {
@@ -608,7 +731,10 @@ fn inputs_for(s: &Situation) -> Inputs {
 }
 
 /// Inputs and, for those of a rule, the switch that makes them anything but zero.
-const INPUT_NAMES: [(&str, usize, usize); 58] = [
+const INPUT_NAMES: [(&str, usize, usize); 70] = [
+    ("front coat 0", 15, 0), ("front coat 1", 15, 1), ("own coat 0", 15, 2), ("own coat 1", 15, 3),
+    ("mineral here", 16, 0), ("mineral east", 16, 1), ("mineral south", 16, 2), ("own mineral", 16, 3),
+    ("biting east", 17, 0), ("biting south", 17, 1), ("biting nearby", 17, 2), ("biters on front", 17, 3),
     ("own energy", 0, 0), ("womb", 0, 1), ("age", 0, 2), ("felt damage", 0, 3),
     ("noise input", 1, 0), ("bias", 1, 1), ("crowding", 1, 2), ("own hardness", 1, 3),
     ("ground here", 2, 0), ("meat here", 2, 1), ("heat here", 2, 2), ("noise here", 2, 3),
@@ -635,24 +761,48 @@ fn input_switches(name: &str) -> &'static [&'static str] {
         "track here" | "track east" | "track south" => &["roads_on"],
         "practice at grazing" | "practice at bodies" => &["skill_on", "skill_sense"],
         "felt upkeep" | "felt drag" => &["biomes_on", "biome_feel"],
+        "front coat 0" | "front coat 1" | "own coat 0" | "own coat 1" => &["coat_on", "coat_sense"],
+        "mineral here" | "mineral east" | "mineral south" | "own mineral" => &["mineral_on"],
+        "biting east" | "biting south" | "biting nearby" | "biters on front" => &["gang_on", "gang_sense"],
         _ => &[],
     }
 }
 
-/// What a genome does across a fixed set of situations.
-fn fingerprint(g: &[f32], hr: usize, situations: &[Situation]) -> Vec<f32> {
-    let on = RULE_ACTIONS.get().copied().unwrap_or([false; 2]);
-    let mut v = Vec::with_capacity(situations.len() * 12);
-    for s in situations {
-        let (shares, _, _) = act(g, hr, &inputs_for(s));
-        v.extend_from_slice(&shares[..10]);
-        // Only actions that exist count, so a rule that's off doesn't change the measure.
-        for k in 0..2 {
-            if on[k] {
-                v.push(shares[10 + k]);
-            }
+/// The budget of one situation, leaving out actions that don't exist in this world.
+fn print_budget(shares: &[f32; N_ACTIONS], v: &mut Vec<f32>) {
+    v.extend_from_slice(&shares[..10]);
+    for (k, on) in rules().actions().iter().enumerate() {
+        if *on {
+            v.push(shares[10 + k]);
         }
     }
+}
+
+fn base_actions() -> usize {
+    10 + rules().actions().iter().filter(|v| **v).count()
+}
+
+/// What a genome does across a fixed set of situations. The base situations come first, each with
+/// the actions that exist. Then, for rules that are on, situations of their own and what
+/// the brain chooses besides its budget. A rule that's off doesn't change the measure at all.
+fn fingerprint(g: &[f32], hr: usize, situations: &[Situation]) -> Vec<f32> {
+    let r = rules();
+    let mut v = Vec::with_capacity(situations.len() * 12);
+    let mut beyond = vec![];
+    for s in situations {
+        let out = settle(g, hr, &inputs_for(s));
+        print_budget(&split_budget(&raw_budget(&out)), &mut v);
+        beyond.extend(measure::rule_outputs(&r, &out));
+    }
+    let make = |energy: f32, food: f32, front: u8| {
+        inputs_for(&Situation { energy, food, food_east: false, front, hit: false, crowd: 0.0 })
+    };
+    for i in measure::rule_situations(&r, &make) {
+        let out = settle(g, hr, &i);
+        print_budget(&split_budget(&raw_budget(&out)), &mut v);
+        beyond.extend(measure::rule_outputs(&r, &out));
+    }
+    v.append(&mut beyond);
     v
 }
 
@@ -806,6 +956,7 @@ fn heading_east(g: &[f32], hr: usize, input: &Inputs) -> f32 {
 
 fn brains(w: &mut Save) -> Value {
     let hr = w.hr;
+    let alive = w.occ.iter().filter(|o| **o != 0 && **o != NONE).count();
     let mut rng = Rng(w.tick ^ 0xABCD);
     // A random sample of cells old enough to have done something.
     let mut pool: Vec<usize> = vec![];
@@ -842,9 +993,9 @@ fn brains(w: &mut Save) -> Value {
 
     // How much does a brain change what it does between situations? A constant function scores 0.
     let per = situations.len();
+    let actions = base_actions();
     let reactivity = |print: &[f32]| -> f32 {
-        let actions = print.len() / per;
-        let mut mean = [0.0f32; 12];
+        let mut mean = [0.0f32; N_ACTIONS];
         for s in 0..per {
             for a in 0..actions {
                 mean[a] += print[s * actions + a] / per as f32;
@@ -904,15 +1055,15 @@ fn brains(w: &mut Save) -> Value {
         let mut out = serde_json::Map::new();
         for (name, s) in &named {
             let i = inputs_for(s);
-            let mut m = [0.0f32; 12];
+            let mut m = [0.0f32; N_ACTIONS];
             for g in gs {
                 let (shares, _, _) = act(g, hr, &i);
-                for a in 0..12 {
+                for a in 0..N_ACTIONS {
                     m[a] += shares[a] / gs.len() as f32;
                 }
             }
             let mut b = serde_json::Map::new();
-            for a in 0..12 {
+            for a in 0..N_ACTIONS {
                 b.insert(ACTIONS[a].into(), json!(round3(m[a])));
             }
             out.insert((*name).to_string(), Value::Object(b));
@@ -960,6 +1111,18 @@ fn brains(w: &mut Save) -> Value {
         Value::Object(out)
     };
 
+    let flow_total: [f32; 4] = {
+        let mut t = [0f32; 4];
+        for o in &w.occ {
+            if *o != 0 && *o != NONE {
+                let st = &w.stat[*o as usize - 1];
+                for d in 0..4 {
+                    t[d] += st[d];
+                }
+            }
+        }
+        t
+    };
     let all: Vec<&Vec<f32>> = genomes.iter().collect();
     let mut strategies = vec![];
     for c in 0..k {
@@ -969,6 +1132,7 @@ fn brains(w: &mut Save) -> Value {
         }
         let gs: Vec<&Vec<f32>> = members.iter().map(|i| &genomes[*i]).collect();
         let (mut diet, mut mv, mut age, mut e, mut nb, mut gen_) = ([0f32; 4], 0f32, 0f32, 0f32, 0f32, 0f32);
+        let (mut free, mut bound, mut coat_c, mut coat_s, mut womb) = (0f32, 0f32, 0f32, 0f32, 0f32);
         for &i in &members {
             let st = &w.stat[pool[i]];
             let cell = &w.cell[pool[i]];
@@ -980,6 +1144,12 @@ fn brains(w: &mut Save) -> Value {
             age += f32::from_bits(cell[2]);
             e += f32::from_bits(cell[0]);
             gen_ += cell[13] as f32;
+            womb += f32::from_bits(cell[1]);
+            free += f32::from_bits(cell[20]);
+            bound += f32::from_bits(cell[22]);
+            let a = f32::from_bits(cell[21]) * std::f32::consts::TAU;
+            coat_c += a.cos();
+            coat_s += a.sin();
         }
         let m = members.len() as f32;
         let t: f32 = diet.iter().sum::<f32>().max(1e-6);
@@ -987,16 +1157,102 @@ fn brains(w: &mut Save) -> Value {
         strategies.push(json!({
             "share": round3(m / n as f32),
             "lives_on": {"ground": round3(diet[0] / t), "meat": round3(diet[1] / t), "bite": round3(diet[2] / t), "gift": round3(diet[3] / t)},
+            // Energy a cell takes in a tick from each source, and this strategy's share of what the
+            // whole world takes from it, scaled up from the sample.
+            "income": {"ground": round5(diet[0] / m), "meat": round5(diet[1] / m), "bite": round5(diet[2] / m), "gift": round5(diet[3] / m)},
+            "share_of_flow": {
+                "ground": round3(diet[0] / n as f32 * alive as f32 / flow_total[0].max(1e-6)),
+                "meat": round3(diet[1] / n as f32 * alive as f32 / flow_total[1].max(1e-6)),
+                "bite": round3(diet[2] / n as f32 * alive as f32 / flow_total[2].max(1e-6)),
+                "gift": round3(diet[3] / n as f32 * alive as f32 / flow_total[3].max(1e-6)),
+            },
+            "mineral": [round3(free / m), round3(bound / m)],
+            "coat_spread": round3(1.0 - (coat_c * coat_c + coat_s * coat_s).sqrt() / m),
+            "womb": round3(womb / m),
             "moving": round3(mv / m), "neighbours": round3(nb / m), "age": (age / m).round(), "energy": round3(e / m), "generation": (gen_ / m).round(),
             "reactivity": round3(members.iter().map(|i| reacts[*i]).sum::<f32>() / m),
             "responds": responds(&gs),
             "headings": heading_table(&gs),
         }));
     }
+    // Who bites whom, in the same strategies, from this one moment: every cell that really bit last
+    // tick, and the body in front of it. Classing a cell means putting its brain through the battery,
+    // so this takes at most 1500 of them.
+    let bite_links = {
+        let size = w.size;
+        let mask = size - 1;
+        let mut pairs: Vec<(usize, usize)> = vec![];
+        for (p, o) in w.occ.iter().enumerate() {
+            if *o == 0 || *o == NONE {
+                continue;
+            }
+            let flags = w.cell[*o as usize - 1][11];
+            if flags & 128 == 0 {
+                continue;
+            }
+            let (dx, dy) = DIRS[(flags & 7) as usize];
+            let q = (((p / size) as i32 + dy) as usize & mask) * size + (((p & mask) as i32 + dx) as usize & mask);
+            let t = w.occ[q];
+            if t != 0 && t != NONE {
+                pairs.push((*o as usize - 1, t as usize - 1));
+            }
+        }
+        let total = pairs.len();
+        for i in 0..pairs.len().min(1500) {
+            let j = i + rng.below(pairs.len() - i);
+            pairs.swap(i, j);
+        }
+        pairs.truncate(1500);
+        let classify = |print: &[f32]| -> usize {
+            let at = project(print, &mean, &axes);
+            let mut best_c = (0usize, f32::MAX);
+            for c in 0..k {
+                let (mut sum, mut count) = (0f32, 0f32);
+                for i in (0..n).step_by((n / 300).max(1)) {
+                    if label[i] == c {
+                        sum += measure::dist2(&at, &reduced[i]);
+                        count += 1.0;
+                    }
+                }
+                if count > 0.0 && sum / count < best_c.1 {
+                    best_c = (c, sum / count);
+                }
+            }
+            best_c.0
+        };
+        let mut matrix = vec![vec![0u32; k]; k];
+        for (a, b) in &pairs {
+            let (ga, gb) = (w.genome(*a), w.genome(*b));
+            let x = classify(&fingerprint(&ga, hr, &situations));
+            let y = classify(&fingerprint(&gb, hr, &situations));
+            matrix[x][y] += 1;
+        }
+        let sampled = pairs.len().max(1) as f32;
+        let mut links = 0;
+        let mut across = 0u32;
+        for x in 0..k {
+            let by_x: u32 = matrix[x].iter().sum();
+            for y in 0..k {
+                if x != y {
+                    across += matrix[x][y];
+                    if by_x >= 10 && matrix[x][y] as f32 >= by_x as f32 * 0.05 {
+                        links += 1;
+                    }
+                }
+            }
+        }
+        json!({
+            "biters_now": total,
+            "matrix": matrix,
+            // Real links: one strategy spends at least 5% of its bites on another.
+            "links": links,
+            "share_across_strategies": round3(across as f32 / sampled),
+        })
+    };
     strategies.sort_by(|a, b| b["share"].as_f64().partial_cmp(&a["share"].as_f64()).unwrap());
 
     // Which senses change behaviour at all?
-    let base_shares: Vec<[f32; 12]> = genomes.iter().take(400).map(|g| act(g, hr, &base).0).collect();
+    let base_shares: Vec<[f32; N_ACTIONS]> = genomes.iter().take(400).map(|g| act(g, hr, &base).0).collect();
     let mut senses = vec![];
     for (name, b, s) in INPUT_NAMES {
         if input_switches(name).iter().any(|k| !w.physics[k].as_bool().unwrap_or(false)) {
@@ -1007,7 +1263,7 @@ fn brains(w: &mut Save) -> Value {
         i[b][s] = if base[b][s].abs() > 0.5 { 0.0 } else { 0.9 };
         for (g, before) in genomes.iter().take(400).zip(&base_shares) {
             let (after, _, _) = act(g, hr, &i);
-            sum += (0..12).map(|a| (after[a] - before[a]).abs()).sum::<f32>() / 2.0;
+            sum += (0..N_ACTIONS).map(|a| (after[a] - before[a]).abs()).sum::<f32>() / 2.0;
         }
         senses.push((name, sum / base_shares.len().max(1) as f32));
     }
@@ -1024,12 +1280,8 @@ fn brains(w: &mut Save) -> Value {
         let out_after = think(g, hr, &base, &mut mem);
         let mut fresh = vec![[0.0f32; 4]; hr];
         let out_fresh = think(g, hr, &base, &mut fresh);
-        let budget = |o: &[[f32; 4]; OUT_ROWS]| {
-            let raw = [o[0][0], o[0][1], o[0][2], o[0][3], o[1][0], o[1][1], o[1][2], o[1][3], o[2][0], o[2][1], o[2][2], o[2][3]];
-            split_budget(&raw)
-        };
-        let (a, b) = (budget(&out_after), budget(&out_fresh));
-        memory_effect += (0..12).map(|i| (a[i] - b[i]).abs()).sum::<f32>() / 2.0;
+        let (a, b) = (split_budget(&raw_budget(&out_after)), split_budget(&raw_budget(&out_fresh)));
+        memory_effect += (0..N_ACTIONS).map(|i| (a[i] - b[i]).abs()).sum::<f32>() / 2.0;
     }
     memory_effect /= genomes.len().min(400).max(1) as f32;
 
@@ -1071,6 +1323,7 @@ fn brains(w: &mut Save) -> Value {
         "strategies_k": k,
         "strategies_silhouette": round3(sil),
         "strategies": strategies,
+        "bite_links": bite_links,
         "whole_population": {"responds": responds(&all), "headings": heading_table(&all)},
         "senses": senses_json,
         "memory_effect": round3(memory_effect),
@@ -1089,7 +1342,7 @@ fn main() {
     if let Some(tile) = args.iter().position(|a| a == "--tile").map(|i| args[i + 1].parse::<usize>().expect("--tile SIZE")) {
         let size = w.size;
         let per_side = size / tile;
-        let (occ, terrain, fa) = (std::mem::take(&mut w.occ), std::mem::take(&mut w.terrain), std::mem::take(&mut w.fa));
+        let (occ, terrain, fd) = (std::mem::take(&mut w.occ), std::mem::take(&mut w.terrain), std::mem::take(&mut w.fd));
         w.size = tile;
         let mut tiles = vec![];
         for i in 0..per_side * per_side {
@@ -1097,7 +1350,7 @@ fn main() {
             let rows: Vec<usize> = (oy..oy + tile).map(|y| y * size + ox).collect();
             w.occ = rows.iter().flat_map(|r| occ[*r..*r + tile].iter().copied()).collect();
             w.terrain = rows.iter().flat_map(|r| terrain[*r..*r + tile].iter().copied()).collect();
-            w.fa = rows.iter().flat_map(|r| fa[*r..*r + tile].iter().copied()).collect();
+            w.fd = rows.iter().flat_map(|r| fd[*r..*r + tile].iter().copied()).collect();
             let alive = w.occ.iter().filter(|o| **o != 0 && **o != NONE).count();
             // Too few cells to sort into strategies says enough by itself.
             if alive < 50 {
@@ -1106,7 +1359,19 @@ fn main() {
             }
             let e = economy(&w);
             let b = brains(&mut w);
-            tiles.push(json!({"tile": i, "tick": w.tick, "size": tile, "alive": alive, "economy": e, "brains": b}));
+            // Where this world's cells have walked over the whole run. Counted on the map, so
+            // unlike the rest of the depth measures it can be told apart world by world.
+            let mut steps: Vec<f32> = w.fd.iter().map(|v| v[3]).collect();
+            let open = w.terrain.iter().filter(|t| *t & (1 << 24) == 0).count().max(1);
+            let total: f64 = steps.iter().map(|v| *v as f64).sum();
+            steps.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
+            let busiest: f64 = steps[..(open / 20).clamp(1, steps.len())].iter().map(|v| *v as f64).sum();
+            let trails = json!({
+                "steps": total,
+                "top5_share": (busiest / total.max(1.0) * 1000.0).round() / 1000.0,
+                "top5_chance": (auto_life_gpu::measure::chance_top_share(total / open as f64, 0.05) * 1000.0).round() / 1000.0,
+            });
+            tiles.push(json!({"tile": i, "tick": w.tick, "size": tile, "alive": alive, "economy": e, "brains": b, "trails": trails}));
             eprintln!("{}: tile {i} of {}, {alive} cells", args[1], per_side * per_side);
         }
         let out = json!({"name": args[1], "tick": w.tick, "batch_tile": tile, "tiles": tiles});

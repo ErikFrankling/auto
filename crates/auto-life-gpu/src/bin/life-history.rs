@@ -8,6 +8,7 @@
 //! alike count as one. Species come from genomes, so the two can be compared. Labels are
 //! plain descriptions of the numbers, for reading. Cells never see them.
 
+use auto_life_gpu::measure::{self, Rules};
 use serde_json::{Value, json};
 use std::io::Read;
 
@@ -18,8 +19,14 @@ const STAT_BYTES: usize = auto_life_gpu::config::STAT_BYTES as usize;
 const ACTIONS: [&str; 12] = [
     "rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme", "armour", "clean",
 ];
-/// Whether the armour and clean actions exist in this run. Set once, from a dump.
-static RULE_ACTIONS: std::sync::OnceLock<[bool; 2]> = std::sync::OnceLock::new();
+/// Which rules are on in this run. Set once, from a dump.
+static RULES: std::sync::OnceLock<Rules> = std::sync::OnceLock::new();
+
+fn rules() -> Rules {
+    RULES.get().copied().unwrap_or_default()
+}
+/// A fine clustering for counts that don't lean to 2, whatever the silhouette says.
+const FINE_K: usize = 12;
 
 struct Rng(u64);
 impl Rng {
@@ -47,6 +54,12 @@ struct Cell {
     energy: f32,
     generation: f32,
     clade: u32,
+    x: u32,
+    y: u32,
+    womb: f32,
+    /// Free mineral, coat, bound mineral, last key.
+    rule: [f32; 4],
+    uptake: f32,
     genome: Vec<f32>,
     print: Vec<f32>,
 }
@@ -54,6 +67,7 @@ struct Cell {
 struct Dump {
     tick: u64,
     alive: u64,
+    size: usize,
     map: Vec<u8>,
     cells: Vec<Cell>,
 }
@@ -74,7 +88,7 @@ fn bt(g: &[f32], block: usize, v: &[f32; 4]) -> [f32; 4] {
 
 type Inputs = [[f32; 4]; IN_BLOCKS];
 
-fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 12], f32, f32) {
+fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 13], [[f32; 4]; OUT_ROWS]) {
     let hh = hr * IN_BLOCKS;
     let ho = hh + hr * hr;
     let mut mem = vec![[0.0f32; 4]; hr];
@@ -110,19 +124,24 @@ fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 12], f32, f32) {
             }
         }
     }
-    let raw = [out[0][0], out[0][1], out[0][2], out[0][3], out[1][0], out[1][1], out[1][2], out[1][3], out[2][0], out[2][1], out[2][2], out[2][3]];
-    let top = raw.iter().cloned().fold(f32::MIN, f32::max);
-    let on = RULE_ACTIONS.get().copied().unwrap_or([false; 2]);
-    let mut s = [0.0f32; 12];
+    let raw = [out[0][0], out[0][1], out[0][2], out[0][3], out[1][0], out[1][1], out[1][2], out[1][3], out[2][0], out[2][1], out[2][2], out[2][3], out[6][0]];
+    let on = rules().actions();
+    let top = raw
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i < 12 || on[2])
+        .map(|(_, v)| *v)
+        .fold(f32::MIN, f32::max);
+    let mut s = [0.0f32; 13];
     let mut z = 0.0;
-    for i in 0..12 {
+    for i in 0..13 {
         if i < 10 || on[i - 10] {
             s[i] = (raw[i] - top).clamp(-20.0, 0.0).exp();
             z += s[i];
         }
     }
     s.iter_mut().for_each(|v| *v /= z);
-    (s, out[3][0], out[3][1])
+    (s, out)
 }
 
 fn sat(v: f32, s: f32) -> f32 {
@@ -195,8 +214,7 @@ fn read_raw(path: &std::path::Path) -> Option<Raw> {
         eprintln!("{why}");
         std::process::exit(2);
     }
-    let on = |k: &str| head["physics"][k].as_bool().unwrap_or(false);
-    let _ = RULE_ACTIONS.set([on("armour_on"), on("waste_on") && on("waste_clean")]);
+    let _ = RULES.set(Rules::from_physics(&head["physics"]));
     let size = head["size"].as_u64()? as usize;
     let count = head["count"].as_u64()? as usize;
     let gb = head["genome_bytes"].as_u64()? as usize;
@@ -209,22 +227,28 @@ fn read_raw(path: &std::path::Path) -> Option<Raw> {
     Some(Raw { tick: head["tick"].as_u64()?, alive: head["alive"].as_u64()?, size, hr, map, rec, recs })
 }
 
-fn cell_of(rec: &[u8], hr: usize, tests: &[Inputs]) -> Cell {
-    let rule_actions = RULE_ACTIONS.get().copied().unwrap_or([false; 2]);
+/// A record as a cell, with its brain run through the standard situations. The rule's own
+/// situations and outputs go on the end, and only what exists counts, so a rule that's off
+/// doesn't change the measure.
+fn cell_of(rec: &[u8], size: usize, hr: usize, tests: &[Inputs]) -> Cell {
+    let rule = rules();
+    let on_actions = rule.actions();
     let u: &[u32] = &bytemuck::pod_collect_to_vec::<u8, u32>(&rec[..CELL_BYTES]);
     let st: Vec<f32> = bytemuck::pod_collect_to_vec::<u8, f32>(&rec[CELL_BYTES..CELL_BYTES + STAT_BYTES]);
     let genome: Vec<f32> = rec[CELL_BYTES + STAT_BYTES..].iter().map(|b| (*b as i8 as f32 / 127.0).max(-1.0)).collect();
-    let mut print = Vec::with_capacity(tests.len() * 12);
+    let mut print = Vec::with_capacity(tests.len() * 13);
+    let mut beyond = vec![];
     for t in tests {
-        let shares = act(&genome, hr, t).0;
+        let (shares, out) = act(&genome, hr, t);
         print.extend_from_slice(&shares[..10]);
-        // Only actions that exist count, so a rule that's off doesn't change the measure.
-        for k in 0..2 {
-            if rule_actions[k] {
+        for k in 0..3 {
+            if on_actions[k] {
                 print.push(shares[10 + k]);
             }
         }
+        beyond.extend(measure::rule_outputs(&rule, &out));
     }
+    print.append(&mut beyond);
     Cell {
         diet: st[0..4].try_into().unwrap(),
         budget: st[4..16].try_into().unwrap(),
@@ -234,6 +258,11 @@ fn cell_of(rec: &[u8], hr: usize, tests: &[Inputs]) -> Cell {
         energy: f32::from_bits(u[0]),
         generation: u[13] as f32,
         clade: u[12],
+        x: u[10] % size as u32,
+        y: u[10] / size as u32,
+        womb: f32::from_bits(u[1]),
+        rule: [f32::from_bits(u[20]), f32::from_bits(u[21]), f32::from_bits(u[22]), f32::from_bits(u[23])],
+        uptake: st[28],
         genome,
         print,
     }
@@ -242,11 +271,11 @@ fn cell_of(rec: &[u8], hr: usize, tests: &[Inputs]) -> Cell {
 impl Raw {
     /// The whole map as one world.
     fn whole(&self, tests: &[Inputs]) -> Dump {
-        let cells = self.recs.chunks_exact(self.rec).map(|r| cell_of(r, self.hr, tests)).collect();
-        Dump { tick: self.tick, alive: self.alive, map: self.map.clone(), cells }
+        let cells = self.recs.chunks_exact(self.rec).map(|r| cell_of(r, self.size, self.hr, tests)).collect();
+        Dump { tick: self.tick, alive: self.alive, size: self.size, map: self.map.clone(), cells }
     }
 
-    /// One world of a batch, with its own map and only its own cells.
+    /// One world of a batch, with its own map and only its own cells, placed as if it were alone.
     fn tile(&self, tile: usize, index: usize, tests: &[Inputs]) -> Dump {
         let per_side = self.size / tile;
         let (ox, oy) = (index % per_side * tile, index / per_side * tile);
@@ -267,10 +296,13 @@ impl Raw {
             let pos = u32::from_le_bytes(r[40..44].try_into().unwrap()) as usize;
             let (x, y) = (pos % self.size, pos / self.size);
             if x >= ox && x < ox + tile && y >= oy && y < oy + tile {
-                cells.push(cell_of(r, self.hr, tests));
+                let mut c = cell_of(r, self.size, self.hr, tests);
+                c.x -= ox as u32;
+                c.y -= oy as u32;
+                cells.push(c);
             }
         }
-        Dump { tick: self.tick, alive, map, cells }
+        Dump { tick: self.tick, alive, size: tile, map, cells }
     }
 }
 
@@ -431,10 +463,13 @@ fn main() {
         eprintln!("usage: life-history NAME DUMP_DIR OUT.json [--tile SIZE]");
         std::process::exit(2);
     }
-    let tests = battery();
     let mut paths: Vec<_> = std::fs::read_dir(&args[2]).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "bin")).collect();
     paths.sort();
     let raws: Vec<Raw> = paths.iter().filter_map(|p| read_raw(p)).collect();
+    // The rules are known once a dump has been read, and some bring situations of their own.
+    let mut tests = battery();
+    let make = |e: f32, food: f32, front: u8| situation(e, food, false, front, false, 0.0);
+    tests.extend(measure::rule_situations(&rules(), &make));
     let tile = args.iter().position(|a| a == "--tile").map(|i| args[i + 1].parse::<usize>().expect("--tile SIZE"));
     let out = match (tile, raws.first()) {
         (Some(tile), Some(first)) => {
@@ -521,10 +556,114 @@ fn analyse(name: &str, dumps: &[Dump]) -> Value {
         b
     };
 
+    // A count that doesn't lean to 2. A fine clustering, with centres too close to count as
+    // different merged, so one blob is one strategy however it's cut. This is the count to read.
+    let fine_k = FINE_K.min(reduced.len().max(1));
+    let (fine_label, fine_centres) = kmeans(&reduced, fine_k, &mut rng);
+    let fine_group = measure::merge_close(&fine_centres, &reduced, &fine_label);
+    let fine_n = fine_group.iter().max().map_or(0, |m| m + 1);
+    let classify_fine = |p: &[f32]| -> usize {
+        let r = reduce(p);
+        let (mut b, mut bd) = (0, f32::MAX);
+        for (c, centre) in fine_centres.iter().enumerate() {
+            let v = dist2(&r, centre);
+            if v < bd {
+                bd = v;
+                b = c;
+            }
+        }
+        fine_group[b]
+    };
+    let dump_groups: Vec<Vec<usize>> = dumps.iter().map(|d| d.cells.iter().map(|c| classify_fine(&c.print)).collect()).collect();
+    let mut fine_shares = vec![vec![0.0f32; dumps.len()]; fine_n];
+    for (i, labels) in dump_groups.iter().enumerate() {
+        for l in labels {
+            fine_shares[*l][i] += 1.0 / labels.len().max(1) as f32;
+        }
+    }
+    // Lasting means at or above a share across 3 log points in a row, or all of them in a short run.
+    let lasting = 3.min(dumps.len().max(1));
+    let persistent = |level: f32| fine_shares.iter().filter(|s| measure::longest_run(s, level) >= lasting).count();
+    let persistent_1pct = persistent(0.01);
+    let persistent_3pct = persistent(0.03);
+    let above_now = |level: f32| -> Vec<usize> {
+        (0..dumps.len()).map(|i| fine_shares.iter().filter(|s| s[i] >= level).count()).collect()
+    };
+
+    // Do strategies live side by side, or only in different places? Against the same fine strategies.
+    let coexistence: Vec<Value> = [16u32, 32, 64]
+        .iter()
+        .map(|tile| {
+            let per_dump: Vec<Value> = dumps
+                .iter()
+                .zip(&dump_groups)
+                .map(|(d, labels)| {
+                    let rows: Vec<(u32, u32, usize)> = d.cells.iter().zip(labels).map(|(c, l)| (c.x, c.y, *l)).collect();
+                    measure::side_by_side(&rows, *tile, d.size as u32, fine_n.max(1))["overlap"].clone()
+                })
+                .collect();
+            let known: Vec<f32> = per_dump.iter().filter_map(|v| v.as_f64()).map(|v| v as f32).collect();
+            json!({
+                "tile": tile,
+                "overlap_over_time": per_dump,
+                "mean_overlap": if known.is_empty() { Value::Null } else { json!(measure::round3(known.iter().sum::<f32>() / known.len() as f32)) },
+            })
+        })
+        .collect();
+
+    // Does each fine strategy's centre of mass move? Measured against how spread out it is, since
+    // a thinly spread strategy's centre jumps about for no reason.
+    let strategy_travel: Vec<Value> = (0..fine_n)
+        .map(|g| {
+            let mut centres: Vec<Option<(f32, f32, f32)>> = vec![];
+            for (d, labels) in dumps.iter().zip(&dump_groups) {
+                let tau = std::f32::consts::TAU / d.size as f32;
+                let (mut sx, mut cx, mut sy, mut cy, mut n) = (0f32, 0f32, 0f32, 0f32, 0f32);
+                for (c, l) in d.cells.iter().zip(labels) {
+                    if *l == g {
+                        sx += (c.x as f32 * tau).sin();
+                        cx += (c.x as f32 * tau).cos();
+                        sy += (c.y as f32 * tau).sin();
+                        cy += (c.y as f32 * tau).cos();
+                        n += 1.0;
+                    }
+                }
+                if n >= 20.0 {
+                    let tight = ((sx * sx + cx * cx).sqrt() + (sy * sy + cy * cy).sqrt()) / 2.0 / n;
+                    centres.push(Some(((sx.atan2(cx) / tau).rem_euclid(d.size as f32), (sy.atan2(cy) / tau).rem_euclid(d.size as f32), tight)));
+                } else {
+                    centres.push(None);
+                }
+            }
+            let mut steps = vec![];
+            for i in 1..dumps.len() {
+                if let (Some(a), Some(b)) = (centres[i - 1], centres[i]) {
+                    let s = dumps[i].size as f32;
+                    let wrap = |d: f32| {
+                        let d = d.abs().rem_euclid(s);
+                        d.min(s - d)
+                    };
+                    let dt = (dumps[i].tick - dumps[i - 1].tick).max(1) as f32;
+                    steps.push((wrap(a.0 - b.0).powi(2) + wrap(a.1 - b.1).powi(2)).sqrt() / dt * 10000.0);
+                }
+            }
+            let tight: Vec<f32> = centres.iter().flatten().map(|c| c.2).collect();
+            json!({
+                "squares_per_10k_ticks": if steps.is_empty() { 0.0 } else { measure::round3(steps.iter().sum::<f32>() / steps.len() as f32) },
+                // Near 1 is one tight place, near 0 is everywhere.
+                "tightness": if tight.is_empty() { 0.0 } else { measure::round3(tight.iter().sum::<f32>() / tight.len() as f32) },
+            })
+        })
+        .collect();
+
     // Each strategy over time, with how it lives.
     let mut share = vec![vec![0.0f32; dumps.len()]; k];
     let mut diet = vec![[0.0f32; 4]; k];
     let mut budget = vec![[0.0f32; 12]; k];
+    let mut rule_state = vec![[0.0f32; 4]; k];
+    let mut coat_xy = vec![[0.0f32; 2]; k];
+    let mut uptake = vec![0.0f32; k];
+    let mut womb = vec![0.0f32; k];
     let mut moving = vec![0.0f32; k];
     let mut crowd = vec![0.0f32; k];
     let mut age = vec![0.0f32; k];
@@ -545,8 +684,17 @@ fn analyse(name: &str, dumps: &[Dump]) -> Value {
             crowd[s] += c.crowd;
             age[s] += c.age;
             energy[s] += c.energy;
+            womb[s] += c.womb;
+            uptake[s] += c.uptake;
+            rule_state[s][0] += c.rule[0];
+            rule_state[s][2] += c.rule[2];
+            let a = c.rule[1] * std::f32::consts::TAU;
+            coat_xy[s][0] += a.cos();
+            coat_xy[s][1] += a.sin();
         }
     }
+    // Who gets energy from what: each strategy's share of the world's total, from the samples.
+    let flow_total: [f32; 4] = std::array::from_fn(|a| diet.iter().map(|d| d[a]).sum::<f32>().max(1e-6));
     let ticks: Vec<u64> = dumps.iter().map(|d| d.tick).collect();
     let mut strategies = vec![];
     for s in 0..k {
@@ -564,6 +712,12 @@ fn analyse(name: &str, dumps: &[Dump]) -> Value {
             "share_over_time": share[s].iter().map(|v| (v * 1000.0).round() / 1000.0).collect::<Vec<f32>>(),
             "peak": peak,
             "lives_on": {"ground": diet[s][0] / t, "meat": diet[s][1] / t, "bite": diet[s][2] / t, "gift": diet[s][3] / t},
+            "income": {"ground": diet[s][0] / m, "meat": diet[s][1] / m, "bite": diet[s][2] / m, "gift": diet[s][3] / m},
+            "share_of_flow": {"ground": diet[s][0] / flow_total[0], "meat": diet[s][1] / flow_total[1], "bite": diet[s][2] / flow_total[2], "gift": diet[s][3] / flow_total[3]},
+            "mineral": [rule_state[s][0] / m, rule_state[s][2] / m],
+            "coat_spread": 1.0 - (coat_xy[s][0].powi(2) + coat_xy[s][1].powi(2)).sqrt() / m,
+            "uptake": uptake[s] / m,
+            "womb": womb[s] / m,
             "moving": moving[s] / m, "neighbours": crowd[s] / m, "age": age[s] / m, "energy": energy[s] / m,
             "budget": bud,
         }));
@@ -702,6 +856,40 @@ fn analyse(name: &str, dumps: &[Dump]) -> Value {
     }
     events.sort_by_key(|e| e["tick"].as_u64().unwrap_or(0));
 
+    // Colonies through time: their sizes, and whether their centres travel.
+    let mapped: Vec<measure::Colonies> = dumps
+        .iter()
+        .map(|d| measure::colonies(&|p| d.map[p / 8] >> (p % 8) & 1 == 1, d.size, 30))
+        .collect();
+    let colony_sizes: Vec<Value> = mapped
+        .iter()
+        .map(|c| measure::size_stats(&c.found.iter().map(|f| f.0).collect::<Vec<_>>(), 30.0))
+        .collect();
+    let (mut tracked, mut lost) = (0usize, 0usize);
+    let (mut moved, mut per_10k, mut kept): (Vec<f32>, Vec<f32>, Vec<f32>) = (vec![], vec![], vec![]);
+    for i in 1..dumps.len() {
+        let t = measure::colony_travel(&mapped[i - 1], &mapped[i], dumps[i].size);
+        tracked += t.tracked;
+        lost += t.lost;
+        let dt = (dumps[i].tick - dumps[i - 1].tick).max(1) as f32;
+        moved.extend(&t.moved);
+        per_10k.extend(t.squares.iter().map(|d| d / dt * 10000.0));
+        kept.extend(&t.kept);
+    }
+    let sorted = |v: &mut Vec<f32>| v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted(&mut moved);
+    sorted(&mut per_10k);
+    sorted(&mut kept);
+    let colony_travel = json!({
+        "tracked": tracked,
+        // Colonies with no overlap at all at the next log point: gone, or moved right off themselves.
+        "lost": lost,
+        "squares_per_10k_ticks": {"p50": measure::percentile(&per_10k, 0.5), "p90": measure::percentile(&per_10k, 0.9)},
+        "radii_moved": {"p50": measure::percentile(&moved, 0.5), "p90": measure::percentile(&moved, 0.9)},
+        "share_past_own_radius": measure::round3(moved.iter().filter(|m| **m > 1.0).count() as f32 / moved.len().max(1) as f32),
+        "squares_kept": {"p50": measure::percentile(&kept, 0.5)},
+    });
+
     // Does the map change? Squares occupied now that were occupied some time ago.
     let overlap = |a: &[u8], b: &[u8]| -> f32 {
         let (mut both, mut either) = (0u64, 0u64);
@@ -802,6 +990,16 @@ fn analyse(name: &str, dumps: &[Dump]) -> Value {
         "strategies_k": k,
         "strategies_silhouette": sil,
         "strategies": strategies,
+        "fine_k": fine_k,
+        "fine_groups": fine_n,
+        "fine_shares_over_time": fine_shares.iter().map(|s| s.iter().map(|v| measure::round3(*v)).collect::<Vec<f32>>()).collect::<Vec<_>>(),
+        "persistent_1pct": persistent_1pct,
+        "persistent_3pct": persistent_3pct,
+        "distinct_3pct_over_time": above_now(0.03),
+        "coexistence": coexistence,
+        "strategy_travel": strategy_travel,
+        "colony_sizes": colony_sizes,
+        "colony_travel": colony_travel,
         "species": species_json,
         "species_alive": alive_species,
         "new_species": new_per_dump,

@@ -23,11 +23,45 @@ const C_NO_SLOT: u32 = 13u;
 const C_SUN_TAKEN: u32 = 14u;
 // 16..31 are free for experiments.
 const C_X0: u32 = 16u;
+// 32 and up are gauges: measuring only, never read by any rule, not saved with a world.
+// Bites sampled, each cell's gain and the target's energy, by how many others bit it last tick.
+const G_BITES: u32 = 32u;
+const G_GAIN: u32 = 40u;
+const G_TARGET: u32 = 48u;
+// The same count on a neighbouring body the biter did not pick.
+const G_CTRL_N: u32 = 56u;
+const G_CTRL_EXTRA: u32 = 57u;
+const G_CELLS: u32 = 58u;
+const G_MATCH_N: u32 = 59u;
+const G_MATCH: u32 = 60u;
+// What stands between a sampled cell and a child.
+const G_LIM_ENERGY: u32 = 61u;
+const G_LIM_MINERAL: u32 = 62u;
+const G_LIM_BOTH: u32 = 63u;
+const G_LIM_ROOM: u32 = 64u;
+const G_LIM_WAIT: u32 = 65u;
+const G_LIM_READY: u32 = 66u;
+const G_FOLLOW: u32 = 67u;
+const G_FOLLOW_N: u32 = 71u;
+const G_CHILD: u32 = 72u;
+const G_CHILD_E: u32 = 78u;
 
 const F_MATE: u32 = 8u;
 const F_SHARE: u32 = 16u;
 const F_MOVED: u32 = 32u;
 const F_BIT: u32 = 64u;
+// Bit with real effort, not the tiny bite of a cell spending on something else.
+const F_ATTACK: u32 = 128u;
+// Bits 8 and 9 are how a cell died.
+const F_OLD: u32 = 1024u;
+// The same as F_ATTACK, in a snapshot word.
+const SEEN_ATTACK: u32 = 32u;
+
+const TAU: f32 = 6.2831853;
+// Mineral comes in whole grains. Any sum of these below 4096 is exact in an f32, so mineral
+// never rounds away. Scaling by a power of two is exact too.
+const GRAIN: f32 = 4096.0;
+fn grains(x: f32) -> f32 { return floor(x * GRAIN) / GRAIN; }
 
 // PCG hash (Jarzynski and Olano 2020).
 fn pcg(v: u32) -> u32 {

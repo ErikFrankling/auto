@@ -14,32 +14,6 @@ const CLEAN: usize = 11;
 
 const W32: usize = 32;
 
-/// Every rule on at once, with settings gentle enough for life to get going.
-const ALL_RULES: &[(&str, &str)] = &[
-    ("mass_on", "true"),
-    ("armour_on", "true"),
-    ("pack_on", "true"),
-    ("waste_on", "true"),
-    ("waste_clean", "true"),
-    ("waste_holds", "0.2"),
-    ("plants_on", "true"),
-    ("plants_peak", "2"),
-    ("weather_sun_on", "true"),
-    ("weather_fire_on", "true"),
-    ("weather_fire_rate", "0.000001"),
-    ("mate_pay", "0.5"),
-    ("compat", "0.6"),
-    ("skill_on", "true"),
-    ("skill_sense", "true"),
-    ("skill_naive", "0.8"),
-    ("biomes_on", "true"),
-    ("walls_on", "true"),
-    ("wall_pass", "8"),
-    ("wall_thick", "2"),
-    ("bloom_share", "0.3"),
-    ("roads_on", "true"),
-];
-
 fn at(x: u32, y: u32) -> usize {
     (y as usize) * W32 + x as usize
 }

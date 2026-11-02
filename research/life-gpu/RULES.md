@@ -6,13 +6,14 @@ Every rule below is off by default and can be combined with any other using `--s
 
 | Thing | Layout |
 |---|---|
-| Cell, 96 bytes | Words 0-15 as before, with `x0`-`x3` now `hard wound skill_g skill_f`. 16-19 `feel_u feel_d mate_near mate_kids`. 20-23 free (`x0`-`x3`) |
+| Cell, 96 bytes | Words 0-15 as before, with `x0`-`x3` now `hard wound skill_g skill_f`. 16-19 `feel_u feel_d mate_near mate_kids`. 20-23 `mineral coat bound key`. None free |
 | Stat, 144 bytes | As before, plus `b3` (spare actions) and `measures` |
-| Fields | `fc` enzyme, waste, fire, free. New `fd` tracks, three free |
+| Fields | `fc` enzyme, waste, fire, free. `fd` tracks, mineral on the ground, mineral richness of the square (never changes), steps taken here (measuring only) |
 | Terrain | Biome bits hold the room when biomes or walls are on |
-| Inputs, 18 blocks | `i1.w` hardness. `i12` waste level, east, south. `i13` track level, east, south. `i14` practice ground, flesh, felt upkeep, felt drag. Free: `i12.w`, `i13.w`, `i15`-`i17` |
-| Outputs, 7 rows | `o2.z` armour, `o2.w` clean. Free: `o5.z`, `o5.w`, `o6`, which is spare actions `x0`-`x3` behind `x0_on`-`x3_on` |
-| Counters | `ctr[14]` sun taken. 16-31 free |
+| Inputs, 18 blocks | `i1.w` hardness. `i12` waste level, east, south. `i13` track level, east, south. `i14` practice ground, flesh, felt upkeep, felt drag. `i15` coat in front, own coat, each as cos and sin. `i16` mineral here, east, south, own store. `i17` bites seen east, south, touching this cell, on the body in front. Free: `i12.w`, `i13.w` |
+| Outputs, 7 rows | `o2.z` armour, `o2.w` clean. `o5.z` coat, `o5.w` key. `o6` is spare actions `x0`-`x3` behind `x0_on`-`x3_on`, where `x0` is also mineral uptake. Rules also read `o6.y` (a gift carries mineral) and `o6.z` (give birth now), outside the budget, so don't turn on `x1_on` or `x2_on` with them. Free: `o6.w` |
+| Counters | `ctr[14]` sun taken. 16-31 free. 32-95 are gauges, for measuring only and not saved with a world |
+| Snapshot word | As before, plus bit 5: this body really bit last tick, at least `gang_effort` of work |
 
 An input whose rule is off reads 0 and isn't computed. An action whose rule is off gets no budget. To add an input or output, also update `input_live` or `output_live` in `config.rs`.
 
@@ -42,6 +43,42 @@ An input whose rule is off reads 0 and isn't computed. An action whose rule is o
 
 **`x0_on` to `x3_on`.** Spare actions for the next rule. On their own they burn energy for nothing, so don't screen them.
 
+## Rules for depth of strategy
+
+`PREDICTIONS.md` has the reasoning, the calculations and what would show each is wrong. It was written before any of them ran. Settings below are where it starts, and none has run at scale.
+
+**`gang_on`.** A neighbour of the target that really bit it last tick, read from the snapshot, counts as an open side, not a blocked one, and its energy joins the attacker's in `force = 2 S^g / (S^g + te^g)`, with `g` as `gang_sharp`. "Really" means at least `gang_effort` of work, since a resting cell spends a little on everything. **`gang_sense`** feeds `i17`. Start: sharp 2, `max_energy=80`. Sharp 1 is the note's formula, and it lets a lone small cell profit from a fat one. Screen: sharp 1-3.
+
+**`coat_on`.** A coat is a point on a circle, moved at most `coat_rate` turns a tick toward `o5.z * coat_span`, at `coat_cost` energy per turn moved. A bite's key is `o5.w * coat_span`, free and instant. Damage is multiplied by `coat_floor + (1 - coat_floor) * m^coat_sharp`, with `m` 1 at a perfect match and 0 half a turn off. A child starts with its parent's coat, and a newcomer with a random one. Neither is sensed. **`coat_sense`** feeds `i15`. Start: sharp 8, floor 0.05, rate 0.002, cost 2, no sense. Floor must stay under about 0.08, or mismatched bites pay anyway. Screen: sharp 2-32, floor 0.01-0.15.
+
+**`mineral_on`.** Mineral lies on the ground in `fd.y`, at a mean of `mineral_start` per open square, shaped by richness in `fd.z`: noise of its own, contrast `mineral_contrast`, pushed away from sun by `mineral_anti`. Action `x0` takes it up at `mineral_rate`, into a store of at most `mineral_cap`. A birth takes `mineral_birth` from the parents, however big the child, and it stays bound in the child until it dies. Death returns store and body to the ground. A bite moves the same share of the target's store as of its energy, and what the biter can't hold falls to the ground. With `o6.y > 0` a gift carries `mineral_give` per unit of work in place of energy. Ground mineral trades between pairs of squares toward each one's richness at `mineral_flow`, so patches last. Newcomers bring none. All amounts are whole grains of 1/4096, so the total is exact. Input `i16`. Start: start 0.5, birth 1, flow 0.02, anti 0.5, `rain_burst_ticks=12000`, since fresh worlds at 0.25 and 0.005 shrink on the software driver at 128, and with every rule on, one seed of four nearly died out at the default burst of 3000. Screen: start 0.08-1.2, flow 0.001-0.05.
+
+**`birth_choice`.** With `o6.z > 0` and a womb over `birth_min` and over a body, a cell gives birth and the child gets the womb, less a body. A womb fills up to `womb_cap`, and `i0.y` becomes `womb / (womb + WOMB)`. Start: min 1.5, cap 40. Screen: min 1.2-3, cap 10-60.
+
+**`age_metabolic`.** The old-age chance is `hazard * (age_rest + (1 - age_rest) * spent / spend)`, using what the cell spent, rolled at the end of its tick and acted on at the start of the next. Start: rest 0.05. Screen: 0.02-0.5.
+
+**`depth_stats`** (on) and **`trail_stats`** (off). Measures, so don't screen them. They have no effect on a world. `depth_stats` samples each cell one tick in 64, and `trail_stats` adds one write per step and reads `fd` at each log point.
+
+### What the log and analysers say about depth
+
+| Where | Field | Meaning |
+|---|---|---|
+| Log | `group_hunting` | By `n`, others that bit the same target last tick: `bites`, `gain_per_bite`, `target_energy`. `extras` is the mean `n`, `extras_control` is the same count on a body next to the biter it didn't pick, and `extras_chance` is what bites at random across all bodies would give. `group_advantage` is gain with company over gain alone |
+| Log | `birth_limit` | Share of sampled cells held back by energy, mineral, both, room, or waiting by choice |
+| Log | `child_size_hist`, `child_energy` | Child energy in bins under 1, 1-2, 2-4, 4-8, 8-16 and over, and its mean |
+| Log | `coat` | `effective` coats in use, `key_match` of real bites against `key_chance`, `key_tracking` from 0 for random to 1 for as good as any one key could do |
+| Log | `mineral` | Per open square: on the ground, in stores, bound in bodies |
+| Log | `trails` | With `trail_stats`, share of steps on the busiest 5% of squares since the last line, and that share for random steps |
+| Log | `follows_others_scent` | When a cell that hardly emits turns, scent on the side it turned to against the mirror side, by channel. Its own trail cancels, and 0 is chance |
+| `life-analyse` | `bite_links` | Who bites whom by strategy at one moment, and how many real links |
+| `life-analyse` | strategies' `income`, `share_of_flow` | Where each strategy's energy comes from, and its share of the world's |
+| `life-analyse` | `colony_sizes`, `colony_size_explained_by_sun`, `mineral_land` | `log10_sd`, power-law `alpha`, `ks` and `decades`. How much terrain explains size. Who lives where across sun and mineral |
+| `life-history` | `fine_groups`, `persistent_1pct`, `persistent_3pct`, `distinct_3pct_over_time` | Counts from 12 clusters with near centres merged, so they don't lean to 2. Read these, not `strategies_k` |
+| `life-history` | `coexistence` | At 16, 32 and 64 squares, the chance two neighbours differ in strategy over the chance two cells anywhere do. 1 is side by side, 0 is separate places |
+| `life-history` | `colony_travel`, `strategy_travel` | Whether colonies and strategies' centres move, in squares per 10,000 ticks and own radii |
+
+`scripts/life_screen.py` runs them all, with binaries from `LIFE_BIN`, `LIFE_ANALYSE` and `LIFE_HISTORY`, and `rank` keeps the best worlds per measure, with no total score.
+
 ## Combinations that make no sense
 
 - `waste_holds` without `waste_clean`: a flat tax on meals, since nobody can get the energy back. Allowed, but it isn't the conversion rule.
@@ -52,6 +89,11 @@ An input whose rule is off reads 0 and isn't computed. An action whose rule is o
 - `walls_on` without `biomes_on`: identical rooms, which is the control for biomes rather than a rule of its own.
 - `plants_on` with low `ground_cap`: the peak moves with the cap, so sun taken up changes a lot.
 - `roads_stats`, `mate_track` and `plants_meter`: measures, so don't screen them.
+- `coat_sense` or `gang_sense` without their rules: their inputs stay off.
+- `x1_on` or `x2_on` with `mineral_on` or `birth_choice`: a gift's carry or the birth signal would also be budget. It runs, but one output means two things.
+- `mineral_on` with `--seed-from`: the planted bodies add to the new world's mineral. The total is then fixed from there on, not equal to `mineral_start`.
+- `birth_choice` with `mate_pay`: pooling still goes by `WOMB`, not by the brain's signal.
+- `gang_on` with `exposure=false`: force still adds up, and nothing counts as blocked.
 
 ## Changed from the experiment branches
 
@@ -66,6 +108,9 @@ An input whose rule is off reads 0 and isn't computed. An action whose rule is o
 
 ## Still unverified
 
+- `gang_on`, `coat_on`, `mineral_on`, `birth_choice` and `age_metabolic` have only run on the software driver at small sizes. `act.wgsl` now holds bigger brains and more reads, so check `gpu_ms_per_tick` on the real GPU.
+- On the software driver, once the shader was large enough, a death that wrote `cell[s].e` and `cell[s].pos` as two fields stored 0 for `pos`. Writing the whole record fixes it there, and the cause isn't known, so the real GPU needs `dead_cells_are_marked_dead_with_everything_on` run on it.
+- With all 15 rules on at once, on the software driver, turning on the ledger changes one lone cell's choice to step on its first tick, though nothing it reads differs. Thread count and the driver's optimiser don't matter, and adding lines to the shader to record that choice makes it go away. 16 random mixes of up to 17 switches showed nothing. It looks like the compiler on a shader that size, but the cause isn't known. `measuring_changes_nothing_with_everything_on` is ignored and shows it, so run it on the real GPU with `--ignored`.
 - No combination has been run on the real GPU or at 512. This merge ran only on the software driver, at 128 and below, which shows that it works and adds up, not what it does to life. `act.wgsl` now binds 18 storage buffers. That passed on the software driver, and hasn't been tried on the real one.
 - Every rule's effect on species comes from its own thin runs in `exp/*/README.md`, and nearly all of those say no verdict.
 - `waste_harm`, armour, pack and mass ranges are mostly guesses around one tested value.

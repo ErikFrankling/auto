@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod explore;
+pub mod measure;
 pub mod report;
 pub mod video;
 pub mod world;

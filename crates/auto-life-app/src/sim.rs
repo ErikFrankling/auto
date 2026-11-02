@@ -707,6 +707,10 @@ fn read_field_ranges(world: &mut World, hi: &mut [f32; explore::HI_COUNT]) {
         explore::HI_TRACKS,
         explore::fit_top(fd.iter().step_by(4).copied().collect()),
     );
+    update(
+        explore::HI_TRAFFIC,
+        explore::fit_top(fd.iter().skip(3).step_by(4).copied().collect()),
+    );
     let base: Vec<f32> = t
         .iter()
         .filter(|v| *v & (1 << 24) == 0)

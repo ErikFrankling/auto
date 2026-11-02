@@ -27,11 +27,10 @@ Everything you need to change is plain text. **You do not need to run cargo, and
 
 Ten rules already exist, all off by default. `research/life-gpu/RULES.md` lists each one and the layout. Spare capacity reserved for you, so no Rust changes are needed, except that a new input or output must be added to `input_live` or `output_live` in `config.rs`:
 
-- Per-cell state: `c.x0`, `c.x1`, `c.x2`, `c.x3`. They start at 0, and children get nothing unless you copy it.
-- Four free budget actions: turn on `x0_on` to `x3_on`. In `act.wgsl`, `s3` holds their share, and you work out their energy as `s3 * spend_here * scale`. They come from output row `o6`.
-- Two more free brain outputs: `o5.z` and `o5.w`.
-- Free inputs: `i12.w`, `i13.w`, and blocks `i15`, `i16`, `i17`.
-- Free fields: `fc.w`, with `fcw_flow` and `fcw_decay`, and `fd.y`, `fd.z`, `fd.w`, for which you set flow and decay in `sweep.wgsl` and switch on `FD_ON`.
+- Per-cell state: none left. A new rule needs a bigger cell record, which means old saves won't load.
+- Free budget actions: turn on `x3_on`. `x0` is mineral uptake, and `o6.y` and `o6.z` are read by mineral and birth rules. In `act.wgsl`, `s3` holds their share, and you work out their energy as `s3 * spend_here * scale`. They come from output row `o6`.
+- Free inputs: `i12.w`, `i13.w`.
+- Free fields: `fc.w`, with `fcw_flow` and `fcw_decay`.
 - Counters: `ctr[C_X0]` to `ctr[C_X0 + 15]`, shown in the log only if you read them out, so prefer the existing measures.
 
 Limits on what a dispatch may touch, or results go wrong silently: cells on the same dispatch are 4 squares apart. A cell may **write** only its own square and squares 1 away, and **read** up to 2 away, from the square where its tick began. `seen` is a read-only snapshot and can be read at any distance. WGSL has no closures, and function-local arrays are about ten times slower, so spell things out with vec4s. Keep the energy ledger honest: if energy leaves a cell or the ground and doesn't go elsewhere, call `lose(x)`. Energy must never appear from nothing.

@@ -12,7 +12,22 @@ pub const ACTIONS: [&str; 16] = [
 ];
 /// The actions that count as how a cell lives: all but the spare ones.
 const LIVING_ACTIONS: usize = 12;
-const BEHAVIOUR_DIMS: usize = 21;
+/// With the first spare action, which is mineral uptake and reads 0 unless it's on.
+const BEHAVIOUR_DIMS: usize = 22;
+/// Where each gauge is in World::gauges(), which starts at counter 32. See common.wgsl.
+const G_BITES: usize = 0;
+const G_GAIN: usize = 8;
+const G_TARGET: usize = 16;
+const G_CTRL_N: usize = 24;
+const G_CTRL_EXTRA: usize = 25;
+const G_CELLS: usize = 26;
+const G_MATCH_N: usize = 27;
+const G_MATCH: usize = 28;
+const G_LIMIT: usize = 29;
+const G_FOLLOW: usize = 35;
+const G_FOLLOW_N: usize = 39;
+const G_CHILD: usize = 40;
+const G_CHILD_E: usize = 46;
 const SKETCH_RANGE: f32 = 4.0;
 
 #[derive(Clone)]
@@ -33,6 +48,7 @@ pub struct Sample {
     pub generation: u32,
     /// Hardness, wound, practice at grazing, practice at eating bodies.
     pub x: [f32; 4],
+    /// Free mineral, coat, mineral bound in the body, the key of the last real bite.
     pub diet: [f32; 4],
     pub budget: [f32; 16],
     pub chase: [f32; 4],
@@ -216,6 +232,7 @@ fn behaviour(c: &Sample) -> [f32; BEHAVIOUR_DIMS] {
     v[18] = c.chase[2];
     v[19] = c.chase[3];
     v[20] = c.misc[0];
+    v[21] = c.budget[12];
     v
 }
 
@@ -224,6 +241,7 @@ fn describe(cells: &[Sample], idx: &[usize], total: usize, size: u32) -> Value {
     let (mut diet, mut budget, mut chase, mut follow) =
         ([0.0f32; 4], [0.0f32; 16], [0.0f32; 4], [0.0f32; 4]);
     let (mut state, mut measures) = ([0.0f32; 4], [0.0f32; 4]);
+    let (mut mineral, mut bound, mut coat_c, mut coat_s, mut womb) = (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
     let (mut e, mut age, mut gen_, mut crowd, mut bk, mut bo) =
         (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
     let (mut cx, mut sx, mut cy, mut sy) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
@@ -240,6 +258,11 @@ fn describe(cells: &[Sample], idx: &[usize], total: usize, size: u32) -> Value {
             budget[k] += c.budget[k] / n;
         }
         e += c.e / n;
+        mineral += c.spare[0] / n;
+        bound += c.spare[2] / n;
+        coat_c += (c.spare[1] * std::f32::consts::TAU).cos() / n;
+        coat_s += (c.spare[1] * std::f32::consts::TAU).sin() / n;
+        womb += c.womb / n;
         age += c.age / n;
         gen_ += c.generation as f32 / n;
         crowd += c.misc[0] * 8.0 / n;
@@ -276,6 +299,9 @@ fn describe(cells: &[Sample], idx: &[usize], total: usize, size: u32) -> Value {
         "wound": round3(state[1]),
         "practice": [round3(state[2]), round3(state[3])],
         "measures": [round3(measures[0]), round3(measures[1]), round3(measures[2]), round3(measures[3])],
+        "mineral": [round3(mineral), round3(bound)],
+        "coat_spread": round3(1.0 - (coat_c * coat_c + coat_s * coat_s).sqrt()),
+        "womb": round3(womb),
     })
 }
 
@@ -464,6 +490,7 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
         // Sampled one tick in 256 at 256 counts per unit: over ticks in a log step, it's sun per tick.
         out["sun_taken"] = json!(sun_taken);
     }
+    depth_log(world, cells, &mut out);
     if cells.len() < 10 {
         return out;
     }
@@ -545,6 +572,172 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
     }
     out["from_other_cells_hist"] = json!(diet_hist);
     out
+}
+
+/// The parts of a log line that look for real depth: what's measured in the shaders, since the
+/// last line. Nothing here is a verdict. research/life-gpu/PREDICTIONS.md says how to read them.
+fn depth_log(world: &mut World, cells: &[Sample], out: &mut Value) {
+    if world.cfg.b("depth_stats") {
+        let now = world.gauges();
+        let d: Vec<u32> = now
+            .iter()
+            .zip(&world.gauge_last)
+            .map(|(a, b)| a.wrapping_sub(*b))
+            .collect();
+        world.gauge_last = now;
+
+        // Group hunting. "n" is how many others bit the same target last tick.
+        let bites: Vec<f32> = (0..8).map(|n| d[G_BITES + n] as f32).collect();
+        let total: f32 = bites.iter().sum();
+        let per_bite = |base: usize, scale: f32| -> Vec<f32> {
+            (0..8)
+                .map(|n| {
+                    if bites[n] > 0.0 {
+                        round3(d[base + n] as f32 / scale / bites[n])
+                    } else {
+                        0.0
+                    }
+                })
+                .collect()
+        };
+        let extras: f32 = bites
+            .iter()
+            .enumerate()
+            .map(|(n, b)| n as f32 * b)
+            .sum::<f32>()
+            / total.max(1.0);
+        let gain = per_bite(G_GAIN, 64.0);
+        let grouped: f32 = bites[1..].iter().sum();
+        let group_gain: f32 = (1..8).map(|n| d[G_GAIN + n] as f32 / 64.0).sum::<f32>() / grouped.max(1.0);
+        out["group_hunting"] = json!({
+            "bites": bites,
+            "gain_per_bite": gain,
+            "target_energy": per_bite(G_TARGET, 4.0),
+            "extras": round3(extras),
+            "extras_control": round3(d[G_CTRL_EXTRA] as f32 / (d[G_CTRL_N] as f32).max(1.0)),
+            // If bites fell at random across all bodies.
+            "extras_chance": round3(total / (d[G_CELLS] as f32).max(1.0)),
+            "share_in_groups": round3(grouped / total.max(1.0)),
+            // Above 1 means a bite in company pays better than a bite alone.
+            "group_advantage": if bites[0] > 0.0 && gain[0] > 0.0 && grouped > 0.0 { round3(group_gain / gain[0]) } else { 0.0 },
+        });
+
+        // What stands between a cell and a child. Cell-ticks, sampled.
+        let names = ["energy", "mineral", "both", "room", "waiting", "ready"];
+        let lim: Vec<f32> = (0..6).map(|k| d[G_LIMIT + k] as f32).collect();
+        let sum: f32 = lim.iter().sum::<f32>().max(1.0);
+        let mut limit = serde_json::Map::new();
+        for k in 0..6 {
+            limit.insert(names[k].into(), json!(round3(lim[k] / sum)));
+        }
+        out["birth_limit"] = Value::Object(limit);
+
+        let born: f32 = (0..6).map(|k| d[G_CHILD + k] as f32).sum();
+        let hist: Vec<u32> = (0..6).map(|k| d[G_CHILD + k]).collect();
+        out["child_size_hist"] = json!(hist);
+        out["child_energy"] = json!(round3(d[G_CHILD_E] as f32 / 16.0 / born.max(1.0)));
+
+        // Scent on the side a cell turned to, against the mirror side, for cells that hardly emit.
+        // Its own trail cancels, and 0 is what chance gives.
+        let n = d[G_FOLLOW_N] as f32;
+        let follow: Vec<f32> = (0..4)
+            .map(|k| round3(d[G_FOLLOW + k] as i32 as f32 / 256.0 / n.max(1.0)))
+            .collect();
+        out["follows_others_scent"] = json!({"mean": follow, "samples": d[G_FOLLOW_N]});
+
+        if world.cfg.b("coat_on") {
+            const BINS: usize = 16;
+            let (mut coats, mut keys) = ([0.0f32; BINS], [0.0f32; BINS]);
+            let mut keyed = 0.0f32;
+            for c in cells {
+                coats[(c.spare[1] * BINS as f32) as usize % BINS] += 1.0;
+                if c.spare[3] > 0.0 {
+                    keys[(c.spare[3] * BINS as f32) as usize % BINS] += 1.0;
+                    keyed += 1.0;
+                }
+            }
+            let share = |v: &[f32; BINS], n: f32| -> f32 {
+                v.iter()
+                    .map(|c| c / n.max(1.0))
+                    .filter(|p| *p > 0.0)
+                    .map(|p| -p * p.ln())
+                    .sum::<f32>()
+                    .exp()
+            };
+            let n = cells.len() as f32;
+            // The most any one key could match this population, on average.
+            let mut best = 0.0f32;
+            for k in 0..BINS {
+                let mut m = 0.0;
+                for (j, c) in coats.iter().enumerate() {
+                    let gap = (k as f32 - j as f32) / BINS as f32 * std::f32::consts::TAU;
+                    m += c / n.max(1.0) * (0.5 + 0.5 * gap.cos());
+                }
+                best = best.max(m);
+            }
+            let matched = d[G_MATCH] as f32 / 256.0 / (d[G_MATCH_N] as f32).max(1.0);
+            out["coat"] = json!({
+                "effective": round3(share(&coats, n)),
+                "effective_keys": round3(share(&keys, keyed)),
+                "hist": coats,
+                "key_hist": keys,
+                "key_match": round3(matched),
+                // A key placed at random matches 0.5 of the way, whatever the coats.
+                "key_chance": 0.5,
+                "key_best": round3(best),
+                // 0 is no better than random, 1 is as good as any one key can be.
+                "key_tracking": if best > 0.51 && d[G_MATCH_N] > 0 { round3((matched - 0.5) / (best - 0.5)) } else { 0.0 },
+            });
+        }
+    }
+    if world.cfg.b("mineral_on") {
+        let w = world.cfg.size as u64;
+        let rows = 256.min(w);
+        let step = (w / rows).max(1);
+        let ranges: Vec<(u64, u64)> = (0..rows)
+            .map(|k| ((k * step) * w * 16, w * 16))
+            .collect();
+        let bytes = world.read_ranges("fd", &ranges);
+        let (mut ground, mut open) = (0.0f64, 0.0f64);
+        for v in bytemuck::cast_slice::<u8, [f32; 4]>(&bytes) {
+            if v[2] > 0.0 {
+                ground += v[1] as f64;
+                open += 1.0;
+            }
+        }
+        let n = cells.len().max(1) as f32;
+        let alive = world.alive() as f32 / world.open.max(1) as f32;
+        let free: f32 = cells.iter().map(|c| c.spare[0]).sum::<f32>() / n * alive;
+        let bound: f32 = cells.iter().map(|c| c.spare[2]).sum::<f32>() / n * alive;
+        // All per open square. Their sum is the world's mineral, estimated from samples here,
+        // and the tests check it exactly.
+        out["mineral"] = json!({
+            "ground": round3((ground / open.max(1.0)) as f32),
+            "free": round3(free),
+            "bound": round3(bound),
+        });
+    }
+    if world.cfg.b("trail_stats") {
+        let fd = world.read_vec4s("fd");
+        if world.trail_last.len() != fd.len() {
+            world.trail_last = vec![0.0; fd.len()];
+        }
+        let mut steps: Vec<f32> = fd
+            .iter()
+            .zip(&world.trail_last)
+            .map(|(a, b)| a[3] - b)
+            .collect();
+        world.trail_last = fd.iter().map(|v| v[3]).collect();
+        let total: f64 = steps.iter().map(|v| *v as f64).sum();
+        let top = (world.open as usize / 20).clamp(1, steps.len());
+        steps.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
+        let busiest: f64 = steps[..top].iter().map(|v| *v as f64).sum();
+        out["trails"] = json!({
+            "steps": total,
+            "top5_share": round3((busiest / total.max(1.0)) as f32),
+            "top5_chance": round3(crate::measure::chance_top_share(total / world.open.max(1) as f64, 0.05) as f32),
+        });
+    }
 }
 
 /// A world's main axes of genome difference, for colouring cells.

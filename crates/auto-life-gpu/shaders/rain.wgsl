@@ -26,6 +26,8 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     c.flags = r & 7u;
     r = pcg(r);
     c.clade = r;
+    // A newcomer brings no mineral, so the total stays exact, and a coat of its own.
+    if (COAT_ON) { c.coat = unit_f(pcg(r)); }
     cell[child] = c;
     var blank: Stat;
     stat[child] = blank;

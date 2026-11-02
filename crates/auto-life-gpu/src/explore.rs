@@ -328,9 +328,9 @@ pub const CELL_VIEWS: &[CellView] = &[
         |c| c.budget[11]
     ),
     scale!(
-        "Spare action x0",
+        "Taking up mineral",
         "Spends on",
-        "Share of budget on spare action x0. Needs x0_on.",
+        "Share of budget on gathering mineral from the ground. Needs mineral_on.",
         "stat[s].b3.x",
         (0.0, 1.0),
         |c| c.budget[12]
@@ -448,34 +448,34 @@ pub const CELL_VIEWS: &[CellView] = &[
         |c| c.mate_kids
     ),
     scale!(
-        "Experiment word x0",
+        "Mineral held",
         "Rules",
-        "A word free for experiments.",
-        "cell[s].x0",
-        (0.0, 1.0),
+        "Mineral a cell has free for its next child. Needs mineral_on.",
+        "cell[s].mineral",
+        (0.0, 4.0),
         |c| c.spare[0]
     ),
     scale!(
-        "Experiment word x1",
+        "Coat",
         "Rules",
-        "A word free for experiments.",
-        "cell[s].x1",
+        "The lock on this cell's body, a place on a circle. Only the right key bites well. Needs coat_on.",
+        "cell[s].coat",
         (0.0, 1.0),
         |c| c.spare[1]
     ),
     scale!(
-        "Experiment word x2",
+        "Mineral in the body",
         "Rules",
-        "A word free for experiments.",
-        "cell[s].x2",
-        (0.0, 1.0),
+        "Mineral built into the body, which comes back when the cell dies. Needs mineral_on.",
+        "cell[s].bound",
+        (0.0, 4.0),
         |c| c.spare[2]
     ),
     scale!(
-        "Experiment word x3",
+        "Key last used",
         "Rules",
-        "A word free for experiments.",
-        "cell[s].x3",
+        "The key this cell last bit with, a place on a circle. Needs coat_on.",
+        "cell[s].key",
         (0.0, 1.0),
         |c| c.spare[3]
     ),
@@ -630,7 +630,8 @@ pub const CELL_VIEWS: &[CellView] = &[
 pub const HI_SUN: usize = 12;
 pub const HI_BASE: usize = 13;
 pub const HI_TRACKS: usize = 14;
-pub const HI_COUNT: usize = 15;
+pub const HI_TRAFFIC: usize = 15;
+pub const HI_COUNT: usize = 16;
 
 pub struct FieldView {
     pub name: &'static str,
@@ -857,6 +858,33 @@ pub const FIELD_VIEWS: &[FieldView] = &[
         0.7,
         HI_TRACKS
     ),
+    field!(
+        "Traffic",
+        "Rules",
+        "Where cells have walked lately, so paths and trails show up. Needs trail_stats.",
+        "fd[p].w",
+        "3].w",
+        0.95,
+        0.75,
+        0.95,
+        HI_TRAFFIC
+    ),
+    FieldView {
+        name: "Mineral on the ground",
+        group: "Rules",
+        help: "Mineral lying free, to be gathered. Needs mineral_on.",
+        wgsl: "return vec3f(0.35, 0.8, 1.0) * level(fd[p].y, 2.0);",
+        tint: None,
+        hi: None,
+    },
+    FieldView {
+        name: "Mineral-rich land",
+        group: "Rules",
+        help: "How much of the mineral flows towards each place. Needs mineral_on.",
+        wgsl: "return vec3f(0.35, 0.55, 1.0) * level(fd[p].z, 4.0);",
+        tint: None,
+        hi: None,
+    },
     FieldView {
         name: "Kind of place",
         group: "Rules",

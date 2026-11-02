@@ -10,7 +10,7 @@ use std::time::Instant;
 use auto_core::Gpu;
 use auto_life_gpu::config::{Scope, cell, stat};
 use auto_life_gpu::explore::{
-    self, CELL_VIEWS, Canvas, FIELD_VIEWS, HI_BASE, HI_SUN, HI_TRACKS, Paint, SCENT_TINT,
+    self, CELL_VIEWS, Canvas, FIELD_VIEWS, HI_BASE, HI_SUN, HI_TRACKS, HI_TRAFFIC, Paint, SCENT_TINT,
     SHOW_CELLS, SHOW_FOUNDER, SHOW_SIMILAR, ViewParams,
 };
 use auto_life_gpu::report::ACTIONS;
@@ -1027,6 +1027,7 @@ impl Ui {
         hi[12] = h[HI_SUN] / b;
         hi[13] = h[HI_BASE] / b;
         hi[14] = h[HI_TRACKS] / b;
+        hi[15] = h[HI_TRAFFIC] / b;
         ViewParams {
             origin: [
                 (self.cx - width as f64 * 0.5 * self.scale) as f32,

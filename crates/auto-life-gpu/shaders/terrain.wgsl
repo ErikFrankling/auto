@@ -75,6 +75,26 @@ fn scale_free_sun(x: f32, y: f32, seed: u32) -> f32 {
     return exp(TERRAIN_CONTRAST * sum / sqrt(max(total, 1e-6)));
 }
 
+// How rich a square is in mineral: patches of every size, from noise of its own, pushed away
+// from rich sun by mineral_anti. Only the shape matters: fill_mineral sets how much there is.
+fn mineral_richness(x: f32, y: f32, seed: u32, sun: f32) -> f32 {
+    var sum = 0.0;
+    var total = 0.0;
+    var size = 8u;
+    var weight = 0.45;
+    var k = 0u;
+    loop {
+        if (size > span / 2u) { break; }
+        sum += (bent(x, y, size, seed ^ (700u + k * 19u)) * 2.0 - 1.0) * weight;
+        total += weight * weight;
+        weight *= 1.3;
+        size *= 2u;
+        k += 1u;
+    }
+    let own = exp(MINERAL_CONTRAST * sum / sqrt(max(total, 1e-6)));
+    return max(own * pow(max(sun, 0.02), -MINERAL_ANTI), 1e-3);
+}
+
 // Ridges of mixed size and thickness, instead of one size of wall everywhere.
 fn scale_free_rock(x: f32, y: f32, seed: u32) -> bool {
     var size = 16u;
@@ -182,6 +202,17 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     fb[p] = vec4f(0.0);
     fc[p] = vec4f(0.0);
     fd[p] = vec4f(0.0);
+    if (MINERAL_ON && !rock) { fd[p].z = mineral_richness(fx, fy, seed, base); }
+}
+
+// Lays mineral out as richness times F.a, in whole grains. Runs once, when the world is built.
+@compute @workgroup_size(64, 1)
+fn fill_mineral(@builtin(global_invocation_id) id: vec3u) {
+    let x = id.x;
+    let y = id.y + F.row0;
+    if (x >= W) { return; }
+    let p = (y << LOG_W) | x;
+    fd[p].y = grains(fd[p].z * bitcast<f32>(F.a));
 }
 
 @compute @workgroup_size(64)
