@@ -1,0 +1,384 @@
+{"run": "b0-0000-t000", "batch": "b0-0000", "tile": 0, "cells": 25444, "biters": 3000, "on_kin": 0.7055955083721711, "kin_near": 0.6352211804528063}
+{"run": "b0-0000-t001", "batch": "b0-0000", "tile": 1, "cells": 8184, "biters": 3000, "on_kin": 0.7783191112538825, "kin_near": 0.7902803169631669}
+{"run": "b0-0000-t002", "batch": "b0-0000", "tile": 2, "cells": 15294, "biters": 3000, "on_kin": 0.5460688845274096, "kin_near": 0.5649175662551766}
+{"run": "b0-0000-t003", "batch": "b0-0000", "tile": 3, "cells": 20453, "biters": 3000, "on_kin": 0.7873650109831349, "kin_near": 0.7480959174785687}
+{"run": "b0-0000-t004", "batch": "b0-0000", "tile": 4, "cells": 5030, "biters": 1735, "on_kin": 0.8673015091748553, "kin_near": 0.8808054686629473}
+{"run": "b0-0000-t005", "batch": "b0-0000", "tile": 5, "cells": 20147, "biters": 3000, "on_kin": 0.314194033538407, "kin_near": 0.34757547891555274}
+{"run": "b0-0000-t006", "batch": "b0-0000", "tile": 6, "cells": 20672, "biters": 3000, "on_kin": 0.27158895802278005, "kin_near": 0.28840752251789026}
+{"run": "b0-0000-t007", "batch": "b0-0000", "tile": 7, "cells": 20108, "biters": 3000, "on_kin": 0.752504170026375, "kin_near": 0.7677025027941472}
+{"run": "b0-0000-t008", "batch": "b0-0000", "tile": 8, "cells": 16160, "biters": 3000, "on_kin": 0.7734496586481895, "kin_near": 0.7756473854026098}
+{"run": "b0-0000-t009", "batch": "b0-0000", "tile": 9, "cells": 16416, "biters": 3000, "on_kin": 0.30058363932422905, "kin_near": 0.2660176528515864}
+{"run": "b0-0000-t010", "batch": "b0-0000", "tile": 10, "cells": 17282, "biters": 3000, "on_kin": 0.5335062139774228, "kin_near": 0.5798810781806972}
+{"run": "b0-0000-t011", "batch": "b0-0000", "tile": 11, "cells": 14856, "biters": 3000, "on_kin": 0.681587275688246, "kin_near": 0.6559633771010648}
+{"run": "b0-0000-t012", "batch": "b0-0000", "tile": 12, "cells": 13143, "biters": 3000, "on_kin": 0.68258406004272, "kin_near": 0.722325248092366}
+{"run": "b0-0000-t013", "batch": "b0-0000", "tile": 13, "cells": 6333, "biters": 2940, "on_kin": 0.46843221677683305, "kin_near": 0.5045609164080322}
+{"run": "b0-0000-t014", "batch": "b0-0000", "tile": 14, "cells": 10421, "biters": 3000, "on_kin": 0.7371808085616612, "kin_near": 0.708830300403587}
+{"run": "b0-0000-t015", "batch": "b0-0000", "tile": 15, "cells": 25725, "biters": 3000, "on_kin": 0.5419994688722541, "kin_near": 0.528607972363744}
+{"run": "b0-0001-t000", "batch": "b0-0001", "tile": 0, "cells": 11048, "biters": 3000, "on_kin": 0.7636567721984328, "kin_near": 0.7184511175240359}
+{"run": "b0-0001-t001", "batch": "b0-0001", "tile": 1, "cells": 7938, "biters": 2585, "on_kin": 0.7640863498729382, "kin_near": 0.7248059077607125}
+{"run": "b0-0001-t002", "batch": "b0-0001", "tile": 2, "cells": 18351, "biters": 3000, "on_kin": 0.35886573263232147, "kin_near": 0.3785003457801376}
+{"run": "b0-0001-t003", "batch": "b0-0001", "tile": 3, "cells": 7122, "biters": 3000, "on_kin": 0.723948299719567, "kin_near": 0.746322201474276}
+{"run": "b0-0001-t004", "batch": "b0-0001", "tile": 4, "cells": 9146, "biters": 3000, "on_kin": 0.43095573236735274, "kin_near": 0.40176858617244604}
+{"run": "b0-0001-t005", "batch": "b0-0001", "tile": 5, "cells": 8443, "biters": 3000, "on_kin": 0.8571661004399787, "kin_near": 0.8327357980382245}
+{"run": "b0-0001-t006", "batch": "b0-0001", "tile": 6, "cells": 30576, "biters": 3000, "on_kin": 0.7278770322289295, "kin_near": 0.7356953906665711}
+{"run": "b0-0001-t007", "batch": "b0-0001", "tile": 7, "cells": 12499, "biters": 3000, "on_kin": 0.5802579892817831, "kin_near": 0.5962017019719633}
+{"run": "b0-0001-t008", "batch": "b0-0001", "tile": 8, "cells": 14788, "biters": 3000, "on_kin": 0.5704948009764528, "kin_near": 0.5394664901699837}
+{"run": "b0-0001-t009", "batch": "b0-0001", "tile": 9, "cells": 10191, "biters": 3000, "on_kin": 0.5941199596847544, "kin_near": 0.5965536607874335}
+{"run": "b0-0001-t010", "batch": "b0-0001", "tile": 10, "cells": 19810, "biters": 3000, "on_kin": 0.3849172102926426, "kin_near": 0.4224723301084911}
+{"run": "b0-0001-t011", "batch": "b0-0001", "tile": 11, "cells": 40568, "biters": 3000, "on_kin": 0.770526598710721, "kin_near": 0.7677832063293104}
+{"run": "b0-0001-t012", "batch": "b0-0001", "tile": 12, "cells": 20536, "biters": 3000, "on_kin": 0.8474416236244279, "kin_near": 0.7958819126395864}
+{"run": "b0-0001-t013", "batch": "b0-0001", "tile": 13, "cells": 25341, "biters": 3000, "on_kin": 0.5475505847701182, "kin_near": 0.561097348190775}
+{"run": "b0-0001-t014", "batch": "b0-0001", "tile": 14, "cells": 24414, "biters": 3000, "on_kin": 0.26652760861928027, "kin_near": 0.31376595100008337}
+{"run": "b0-0001-t015", "batch": "b0-0001", "tile": 15, "cells": 20140, "biters": 3000, "on_kin": 0.4897483772766645, "kin_near": 0.5121424696079281}
+{"run": "b0-0002-t000", "batch": "b0-0002", "tile": 0, "cells": 6, "biters": 1}
+{"run": "b0-0002-t001", "batch": "b0-0002", "tile": 1, "cells": 7, "biters": 0}
+{"run": "b0-0002-t002", "batch": "b0-0002", "tile": 2, "cells": 4, "biters": 0}
+{"run": "b0-0002-t003", "batch": "b0-0002", "tile": 3, "cells": 6, "biters": 0}
+{"run": "b0-0002-t004", "batch": "b0-0002", "tile": 4, "cells": 2, "biters": 0}
+{"run": "b0-0002-t005", "batch": "b0-0002", "tile": 5, "cells": 8, "biters": 0}
+{"run": "b0-0002-t006", "batch": "b0-0002", "tile": 6, "cells": 8, "biters": 0}
+{"run": "b0-0002-t007", "batch": "b0-0002", "tile": 7, "cells": 5, "biters": 0}
+{"run": "b0-0002-t008", "batch": "b0-0002", "tile": 8, "cells": 6, "biters": 0}
+{"run": "b0-0002-t009", "batch": "b0-0002", "tile": 9, "cells": 4, "biters": 0}
+{"run": "b0-0002-t010", "batch": "b0-0002", "tile": 10, "cells": 1, "biters": 0}
+{"run": "b0-0002-t011", "batch": "b0-0002", "tile": 11, "cells": 1, "biters": 0}
+{"run": "b0-0002-t012", "batch": "b0-0002", "tile": 12, "cells": 6, "biters": 0}
+{"run": "b0-0002-t013", "batch": "b0-0002", "tile": 13, "cells": 1, "biters": 0}
+{"run": "b0-0002-t014", "batch": "b0-0002", "tile": 14, "cells": 3, "biters": 0}
+{"run": "b0-0002-t015", "batch": "b0-0002", "tile": 15, "cells": 3, "biters": 0}
+{"run": "b0-0003-t000", "batch": "b0-0003", "tile": 0, "cells": 10232, "biters": 1408, "on_kin": 0.28990119995944014, "kin_near": 0.31090100244508995}
+{"run": "b0-0003-t001", "batch": "b0-0003", "tile": 1, "cells": 9154, "biters": 863, "on_kin": 0.861720520792479, "kin_near": 0.7872270361749226}
+{"run": "b0-0003-t002", "batch": "b0-0003", "tile": 2, "cells": 10633, "biters": 1339, "on_kin": 0.5829087888859512, "kin_near": 0.5902470119766481}
+{"run": "b0-0003-t003", "batch": "b0-0003", "tile": 3, "cells": 20030, "biters": 3000, "on_kin": 0.6049260362410678, "kin_near": 0.6509208182936611}
+{"run": "b0-0003-t004", "batch": "b0-0003", "tile": 4, "cells": 10440, "biters": 466, "on_kin": 0.6509162025051917, "kin_near": 0.6850353272145351}
+{"run": "b0-0003-t005", "batch": "b0-0003", "tile": 5, "cells": 22143, "biters": 3000, "on_kin": 0.7141062172685301, "kin_near": 0.7678100099121534}
+{"run": "b0-0003-t006", "batch": "b0-0003", "tile": 6, "cells": 10729, "biters": 3000, "on_kin": 0.7828654720369947, "kin_near": 0.7274312656897975}
+{"run": "b0-0003-t007", "batch": "b0-0003", "tile": 7, "cells": 2927, "biters": 61, "on_kin": 0.5295085827482156, "kin_near": 0.3999567930888905}
+{"run": "b0-0003-t008", "batch": "b0-0003", "tile": 8, "cells": 18567, "biters": 3000, "on_kin": 0.49402346081916304, "kin_near": 0.6146409715216208}
+{"run": "b0-0003-t009", "batch": "b0-0003", "tile": 9, "cells": 9081, "biters": 2005, "on_kin": 0.7347837813172149, "kin_near": 0.7386101967419431}
+{"run": "b0-0003-t010", "batch": "b0-0003", "tile": 10, "cells": 10559, "biters": 2271, "on_kin": 0.6422283825481412, "kin_near": 0.5961938433536016}
+{"run": "b0-0003-t011", "batch": "b0-0003", "tile": 11, "cells": 11439, "biters": 3000, "on_kin": 0.6431207353424369, "kin_near": 0.6728243223095121}
+{"run": "b0-0003-t012", "batch": "b0-0003", "tile": 12, "cells": 16032, "biters": 3000, "on_kin": 0.8009338036653948, "kin_near": 0.7779231492893244}
+{"run": "b0-0003-t013", "batch": "b0-0003", "tile": 13, "cells": 5442, "biters": 684, "on_kin": 0.7823818108140593, "kin_near": 0.721607644491963}
+{"run": "b0-0003-t014", "batch": "b0-0003", "tile": 14, "cells": 30373, "biters": 3000, "on_kin": 0.7775205840781332, "kin_near": 0.7567293204498851}
+{"run": "b0-0003-t015", "batch": "b0-0003", "tile": 15, "cells": 28044, "biters": 3000, "on_kin": 0.7194395113100808, "kin_near": 0.7425275347213464}
+{"run": "b0-0004-t000", "batch": "b0-0004", "tile": 0, "cells": 7, "biters": 0}
+{"run": "b0-0004-t001", "batch": "b0-0004", "tile": 1, "cells": 1652, "biters": 993, "on_kin": 0.6023480486438691, "kin_near": 0.6659790959173952}
+{"run": "b0-0004-t002", "batch": "b0-0004", "tile": 2, "cells": 3, "biters": 0}
+{"run": "b0-0004-t003", "batch": "b0-0004", "tile": 3, "cells": 4, "biters": 0}
+{"run": "b0-0004-t004", "batch": "b0-0004", "tile": 4, "cells": 2129, "biters": 1780, "on_kin": 0.865728591907451, "kin_near": 0.8775169240274242}
+{"run": "b0-0004-t005", "batch": "b0-0004", "tile": 5, "cells": 1817, "biters": 1288, "on_kin": 0.657856566447155, "kin_near": 0.717800585796634}
+{"run": "b0-0004-t006", "batch": "b0-0004", "tile": 6, "cells": 3053, "biters": 2668, "on_kin": 0.5697370641896286, "kin_near": 0.6065018333476199}
+{"run": "b0-0004-t007", "batch": "b0-0004", "tile": 7, "cells": 2006, "biters": 1254, "on_kin": 0.515248045716589, "kin_near": 0.55833067835051}
+{"run": "b0-0004-t008", "batch": "b0-0004", "tile": 8, "cells": 3681, "biters": 3000, "on_kin": 0.5081622770567003, "kin_near": 0.5105759247273457}
+{"run": "b0-0004-t009", "batch": "b0-0004", "tile": 9, "cells": 751, "biters": 605, "on_kin": 0.8550868988181485, "kin_near": 0.8954439618545631}
+{"run": "b0-0004-t010", "batch": "b0-0004", "tile": 10, "cells": 2563, "biters": 2153, "on_kin": 0.836102097738197, "kin_near": 0.8230920244201251}
+{"run": "b0-0004-t011", "batch": "b0-0004", "tile": 11, "cells": 1, "biters": 0}
+{"run": "b0-0004-t012", "batch": "b0-0004", "tile": 12, "cells": 1649, "biters": 1352, "on_kin": 0.8877113978590597, "kin_near": 0.879911617497925}
+{"run": "b0-0004-t013", "batch": "b0-0004", "tile": 13, "cells": 2488, "biters": 2063, "on_kin": 0.7692219251742434, "kin_near": 0.7636579438489538}
+{"run": "b0-0004-t014", "batch": "b0-0004", "tile": 14, "cells": 2524, "biters": 2317, "on_kin": 0.7759168003109083, "kin_near": 0.7861755858738912}
+{"run": "b0-0004-t015", "batch": "b0-0004", "tile": 15, "cells": 869, "biters": 544, "on_kin": 0.9967869111386051, "kin_near": 0.9992790579605122}
+{"run": "b0-0005-t000", "batch": "b0-0005", "tile": 0, "cells": 44205, "biters": 3000, "on_kin": 0.7577095939061291, "kin_near": 0.7550776837313642}
+{"run": "b0-0005-t001", "batch": "b0-0005", "tile": 1, "cells": 1, "biters": 0}
+{"run": "b0-0005-t002", "batch": "b0-0005", "tile": 2, "cells": 1, "biters": 0}
+{"run": "b0-0005-t003", "batch": "b0-0005", "tile": 3, "cells": 22337, "biters": 3000, "on_kin": 0.713370177095731, "kin_near": 0.7264538318687961}
+{"run": "b0-0005-t004", "batch": "b0-0005", "tile": 4, "cells": 8699, "biters": 522, "on_kin": 0.8611157065691936, "kin_near": 0.8012828927408524}
+{"run": "b0-0005-t005", "batch": "b0-0005", "tile": 5, "cells": 33837, "biters": 3000, "on_kin": 0.8256083766959016, "kin_near": 0.831636622305073}
+{"run": "b0-0005-t006", "batch": "b0-0005", "tile": 6, "cells": 0, "biters": 0}
+{"run": "b0-0005-t007", "batch": "b0-0005", "tile": 7, "cells": 29455, "biters": 3000, "on_kin": 0.8146394482686498, "kin_near": 0.7921456250191041}
+{"run": "b0-0005-t008", "batch": "b0-0005", "tile": 8, "cells": 0, "biters": 0}
+{"run": "b0-0005-t009", "batch": "b0-0005", "tile": 9, "cells": 1, "biters": 0}
+{"run": "b0-0005-t010", "batch": "b0-0005", "tile": 10, "cells": 24114, "biters": 3000, "on_kin": 0.8631742039008339, "kin_near": 0.8972417239529302}
+{"run": "b0-0005-t011", "batch": "b0-0005", "tile": 11, "cells": 36573, "biters": 3000, "on_kin": 0.8358819442187246, "kin_near": 0.8302641132901062}
+{"run": "b0-0005-t012", "batch": "b0-0005", "tile": 12, "cells": 1, "biters": 0}
+{"run": "b0-0005-t013", "batch": "b0-0005", "tile": 13, "cells": 32977, "biters": 3000, "on_kin": 0.7648793771562694, "kin_near": 0.7861297656251639}
+{"run": "b0-0005-t014", "batch": "b0-0005", "tile": 14, "cells": 1, "biters": 0}
+{"run": "b0-0005-t015", "batch": "b0-0005", "tile": 15, "cells": 2, "biters": 0}
+{"run": "b0-0006-t000", "batch": "b0-0006", "tile": 0, "cells": 11500, "biters": 1315, "on_kin": 0.9309851975009598, "kin_near": 0.9565256672301317}
+{"run": "b0-0006-t001", "batch": "b0-0006", "tile": 1, "cells": 15234, "biters": 3000, "on_kin": 0.9096582629091787, "kin_near": 0.9053062721804621}
+{"run": "b0-0006-t002", "batch": "b0-0006", "tile": 2, "cells": 26651, "biters": 3000, "on_kin": 0.655376130931416, "kin_near": 0.6674906561294314}
+{"run": "b0-0006-t003", "batch": "b0-0006", "tile": 3, "cells": 33735, "biters": 3000, "on_kin": 0.4344015546201923, "kin_near": 0.4400980898860566}
+{"run": "b0-0006-t004", "batch": "b0-0006", "tile": 4, "cells": 60351, "biters": 3000, "on_kin": 0.6810724324672962, "kin_near": 0.6886240324328305}
+{"run": "b0-0006-t005", "batch": "b0-0006", "tile": 5, "cells": 29143, "biters": 3000, "on_kin": 0.5005040463980525, "kin_near": 0.5431546206690694}
+{"run": "b0-0006-t006", "batch": "b0-0006", "tile": 6, "cells": 16021, "biters": 3000, "on_kin": 0.797386302550315, "kin_near": 0.806399192089329}
+{"run": "b0-0006-t007", "batch": "b0-0006", "tile": 7, "cells": 19876, "biters": 3000, "on_kin": 0.48064818287621125, "kin_near": 0.5287585332656983}
+{"run": "b0-0006-t008", "batch": "b0-0006", "tile": 8, "cells": 9896, "biters": 954, "on_kin": 0.9403502606699057, "kin_near": 0.9609662151293968}
+{"run": "b0-0006-t009", "batch": "b0-0006", "tile": 9, "cells": 14917, "biters": 3000, "on_kin": 0.7036975811043097, "kin_near": 0.7574508657632413}
+{"run": "b0-0006-t010", "batch": "b0-0006", "tile": 10, "cells": 13104, "biters": 3000, "on_kin": 0.7495032145904134, "kin_near": 0.7372339732185845}
+{"run": "b0-0006-t011", "batch": "b0-0006", "tile": 11, "cells": 11552, "biters": 2013, "on_kin": 0.35245002769191, "kin_near": 0.33293525830055737}
+{"run": "b0-0006-t012", "batch": "b0-0006", "tile": 12, "cells": 13327, "biters": 3000, "on_kin": 0.5707747281799599, "kin_near": 0.5696098119220401}
+{"run": "b0-0006-t013", "batch": "b0-0006", "tile": 13, "cells": 16793, "biters": 927, "on_kin": 0.6086152070713177, "kin_near": 0.5224155959681253}
+{"run": "b0-0006-t014", "batch": "b0-0006", "tile": 14, "cells": 14396, "biters": 3000, "on_kin": 0.4954099647448918, "kin_near": 0.4900793071222256}
+{"run": "b0-0006-t015", "batch": "b0-0006", "tile": 15, "cells": 14105, "biters": 3000, "on_kin": 0.6976148568718576, "kin_near": 0.6731855797178834}
+{"run": "b0-0007-t000", "batch": "b0-0007", "tile": 0, "cells": 0, "biters": 0}
+{"run": "b0-0007-t001", "batch": "b0-0007", "tile": 1, "cells": 197, "biters": 76, "on_kin": 1.0, "kin_near": 1.0}
+{"run": "b0-0007-t002", "batch": "b0-0007", "tile": 2, "cells": 1, "biters": 0}
+{"run": "b0-0007-t003", "batch": "b0-0007", "tile": 3, "cells": 3, "biters": 0}
+{"run": "b0-0007-t004", "batch": "b0-0007", "tile": 4, "cells": 1, "biters": 0}
+{"run": "b0-0007-t005", "batch": "b0-0007", "tile": 5, "cells": 0, "biters": 0}
+{"run": "b0-0007-t006", "batch": "b0-0007", "tile": 6, "cells": 6956, "biters": 695, "on_kin": 0.40125703053310424, "kin_near": 0.4291497131561984}
+{"run": "b0-0007-t007", "batch": "b0-0007", "tile": 7, "cells": 1, "biters": 0}
+{"run": "b0-0007-t008", "batch": "b0-0007", "tile": 8, "cells": 0, "biters": 0}
+{"run": "b0-0007-t009", "batch": "b0-0007", "tile": 9, "cells": 2959, "biters": 1544, "on_kin": 0.9452065268594936, "kin_near": 0.9670779994513211}
+{"run": "b0-0007-t010", "batch": "b0-0007", "tile": 10, "cells": 2, "biters": 0}
+{"run": "b0-0007-t011", "batch": "b0-0007", "tile": 11, "cells": 1, "biters": 0}
+{"run": "b0-0007-t012", "batch": "b0-0007", "tile": 12, "cells": 0, "biters": 0}
+{"run": "b0-0007-t013", "batch": "b0-0007", "tile": 13, "cells": 0, "biters": 0}
+{"run": "b0-0007-t014", "batch": "b0-0007", "tile": 14, "cells": 1, "biters": 0}
+{"run": "b0-0007-t015", "batch": "b0-0007", "tile": 15, "cells": 1, "biters": 0}
+{"run": "b0-0008-t000", "batch": "b0-0008", "tile": 0, "cells": 0, "biters": 0}
+{"run": "b0-0008-t001", "batch": "b0-0008", "tile": 1, "cells": 0, "biters": 0}
+{"run": "b0-0008-t002", "batch": "b0-0008", "tile": 2, "cells": 0, "biters": 0}
+{"run": "b0-0008-t003", "batch": "b0-0008", "tile": 3, "cells": 4, "biters": 0}
+{"run": "b0-0008-t004", "batch": "b0-0008", "tile": 4, "cells": 2, "biters": 0}
+{"run": "b0-0008-t005", "batch": "b0-0008", "tile": 5, "cells": 0, "biters": 0}
+{"run": "b0-0008-t006", "batch": "b0-0008", "tile": 6, "cells": 2, "biters": 0}
+{"run": "b0-0008-t007", "batch": "b0-0008", "tile": 7, "cells": 3832, "biters": 2719, "on_kin": 0.6769747534812685, "kin_near": 0.6403126790973929}
+{"run": "b0-0008-t008", "batch": "b0-0008", "tile": 8, "cells": 0, "biters": 0}
+{"run": "b0-0008-t009", "batch": "b0-0008", "tile": 9, "cells": 3, "biters": 1}
+{"run": "b0-0008-t010", "batch": "b0-0008", "tile": 10, "cells": 2, "biters": 0}
+{"run": "b0-0008-t011", "batch": "b0-0008", "tile": 11, "cells": 0, "biters": 0}
+{"run": "b0-0008-t012", "batch": "b0-0008", "tile": 12, "cells": 3, "biters": 0}
+{"run": "b0-0008-t013", "batch": "b0-0008", "tile": 13, "cells": 2, "biters": 0}
+{"run": "b0-0008-t014", "batch": "b0-0008", "tile": 14, "cells": 3, "biters": 0}
+{"run": "b0-0008-t015", "batch": "b0-0008", "tile": 15, "cells": 3, "biters": 0}
+{"run": "b0-0009-t000", "batch": "b0-0009", "tile": 0, "cells": 2, "biters": 0}
+{"run": "b0-0009-t001", "batch": "b0-0009", "tile": 1, "cells": 4458, "biters": 3000, "on_kin": 0.7157258832121887, "kin_near": 0.7358214632948907}
+{"run": "b0-0009-t002", "batch": "b0-0009", "tile": 2, "cells": 3990, "biters": 3000, "on_kin": 0.6611452445730758, "kin_near": 0.6579614957133975}
+{"run": "b0-0009-t003", "batch": "b0-0009", "tile": 3, "cells": 708, "biters": 270, "on_kin": 1.0, "kin_near": 1.0}
+{"run": "b0-0009-t004", "batch": "b0-0009", "tile": 4, "cells": 2058, "biters": 1384, "on_kin": 0.5189734597096975, "kin_near": 0.5099830915808136}
+{"run": "b0-0009-t005", "batch": "b0-0009", "tile": 5, "cells": 1805, "biters": 1410, "on_kin": 0.867851844816277, "kin_near": 0.8893228234316577}
+{"run": "b0-0009-t006", "batch": "b0-0009", "tile": 6, "cells": 1794, "biters": 1146, "on_kin": 0.5901532550039631, "kin_near": 0.6895862993742542}
+{"run": "b0-0009-t007", "batch": "b0-0009", "tile": 7, "cells": 1062, "biters": 640, "on_kin": 0.9474268356043473, "kin_near": 0.9697187230150646}
+{"run": "b0-0009-t008", "batch": "b0-0009", "tile": 8, "cells": 1968, "biters": 1388, "on_kin": 0.6272878657935015, "kin_near": 0.6563450608159707}
+{"run": "b0-0009-t009", "batch": "b0-0009", "tile": 9, "cells": 558, "biters": 303, "on_kin": 0.994376945334026, "kin_near": 0.9818676403483676}
+{"run": "b0-0009-t010", "batch": "b0-0009", "tile": 10, "cells": 2621, "biters": 2058, "on_kin": 0.7186836870342861, "kin_near": 0.7064653094029663}
+{"run": "b0-0009-t011", "batch": "b0-0009", "tile": 11, "cells": 1883, "biters": 1498, "on_kin": 0.9131612208631661, "kin_near": 0.9202706815002949}
+{"run": "b0-0009-t012", "batch": "b0-0009", "tile": 12, "cells": 604, "biters": 336, "on_kin": 0.8783105791415604, "kin_near": 0.873439500641209}
+{"run": "b0-0009-t013", "batch": "b0-0009", "tile": 13, "cells": 1547, "biters": 555, "on_kin": 0.6462198868964322, "kin_near": 0.6522626772841833}
+{"run": "b0-0009-t014", "batch": "b0-0009", "tile": 14, "cells": 2597, "biters": 1681, "on_kin": 0.8531506506364935, "kin_near": 0.8372616007542184}
+{"run": "b0-0009-t015", "batch": "b0-0009", "tile": 15, "cells": 1052, "biters": 602, "on_kin": 0.9689192991203729, "kin_near": 0.9152744013210969}
+{"run": "b0-0010-t000", "batch": "b0-0010", "tile": 0, "cells": 300, "biters": 283, "on_kin": 0.9998355571873839, "kin_near": 1.0}
+{"run": "b0-0010-t001", "batch": "b0-0010", "tile": 1, "cells": 32008, "biters": 3000, "on_kin": 0.9979475356024977, "kin_near": 0.9985072655569303}
+{"run": "b0-0010-t002", "batch": "b0-0010", "tile": 2, "cells": 40098, "biters": 3000, "on_kin": 0.9847294098572922, "kin_near": 0.9888734563450826}
+{"run": "b0-0010-t003", "batch": "b0-0010", "tile": 3, "cells": 1960, "biters": 1773, "on_kin": 0.998849128599986, "kin_near": 1.0}
+{"run": "b0-0010-t004", "batch": "b0-0010", "tile": 4, "cells": 19729, "biters": 3000, "on_kin": 0.9293152379885502, "kin_near": 0.9354201274130869}
+{"run": "b0-0010-t005", "batch": "b0-0010", "tile": 5, "cells": 13954, "biters": 2290, "on_kin": 0.6382294703994312, "kin_near": 0.6503180652529288}
+{"run": "b0-0010-t006", "batch": "b0-0010", "tile": 6, "cells": 31696, "biters": 3000, "on_kin": 0.9936274584453639, "kin_near": 0.994782242584573}
+{"run": "b0-0010-t007", "batch": "b0-0010", "tile": 7, "cells": 21062, "biters": 3000, "on_kin": 0.9485724077260049, "kin_near": 0.947096317247071}
+{"run": "b0-0010-t008", "batch": "b0-0010", "tile": 8, "cells": 19574, "biters": 3000, "on_kin": 0.9990223811778378, "kin_near": 0.9993794082358007}
+{"run": "b0-0010-t009", "batch": "b0-0010", "tile": 9, "cells": 12412, "biters": 3000, "on_kin": 0.8756366529907845, "kin_near": 0.8714086188264794}
+{"run": "b0-0010-t010", "batch": "b0-0010", "tile": 10, "cells": 1906, "biters": 1757, "on_kin": 0.9951171554923433, "kin_near": 1.0}
+{"run": "b0-0010-t011", "batch": "b0-0010", "tile": 11, "cells": 22271, "biters": 3000, "on_kin": 0.9771119066301823, "kin_near": 0.9968414771851832}
+{"run": "b0-0010-t012", "batch": "b0-0010", "tile": 12, "cells": 236, "biters": 200, "on_kin": 0.9990332643382802, "kin_near": 1.0}
+{"run": "b0-0010-t013", "batch": "b0-0010", "tile": 13, "cells": 16055, "biters": 3000, "on_kin": 0.9988238380514246, "kin_near": 1.0}
+{"run": "b0-0010-t014", "batch": "b0-0010", "tile": 14, "cells": 825, "biters": 644, "on_kin": 0.9937588599581942, "kin_near": 1.0}
+{"run": "b0-0010-t015", "batch": "b0-0010", "tile": 15, "cells": 5, "biters": 0}
+{"run": "b0-0011-t000", "batch": "b0-0011", "tile": 0, "cells": 1, "biters": 0}
+{"run": "b0-0011-t001", "batch": "b0-0011", "tile": 1, "cells": 552, "biters": 281, "on_kin": 0.9999998553940269, "kin_near": 1.0}
+{"run": "b0-0011-t002", "batch": "b0-0011", "tile": 2, "cells": 2, "biters": 0}
+{"run": "b0-0011-t003", "batch": "b0-0011", "tile": 3, "cells": 4, "biters": 0}
+{"run": "b0-0011-t004", "batch": "b0-0011", "tile": 4, "cells": 1391, "biters": 730, "on_kin": 0.8139009954119182, "kin_near": 0.8226282469124709}
+{"run": "b0-0011-t005", "batch": "b0-0011", "tile": 5, "cells": 2, "biters": 0}
+{"run": "b0-0011-t006", "batch": "b0-0011", "tile": 6, "cells": 4, "biters": 0}
+{"run": "b0-0011-t007", "batch": "b0-0011", "tile": 7, "cells": 804, "biters": 299, "on_kin": 1.0, "kin_near": 1.0}
+{"run": "b0-0011-t008", "batch": "b0-0011", "tile": 8, "cells": 71, "biters": 11, "on_kin": 1.0, "kin_near": 1.0}
+{"run": "b0-0011-t009", "batch": "b0-0011", "tile": 9, "cells": 4, "biters": 0}
+{"run": "b0-0011-t010", "batch": "b0-0011", "tile": 10, "cells": 667, "biters": 111, "on_kin": 1.0, "kin_near": 1.0}
+{"run": "b0-0011-t011", "batch": "b0-0011", "tile": 11, "cells": 1740, "biters": 815, "on_kin": 0.9962907775798273, "kin_near": 0.9963418707502999}
+{"run": "b0-0011-t012", "batch": "b0-0011", "tile": 12, "cells": 168, "biters": 63, "on_kin": 1.0, "kin_near": 1.0}
+{"run": "b0-0011-t013", "batch": "b0-0011", "tile": 13, "cells": 2017, "biters": 1146, "on_kin": 0.9965886709608024, "kin_near": 0.9960671544751906}
+{"run": "b0-0011-t014", "batch": "b0-0011", "tile": 14, "cells": 1327, "biters": 761, "on_kin": 0.9943490488136483, "kin_near": 0.9885401527049708}
+{"run": "b0-0011-t015", "batch": "b0-0011", "tile": 15, "cells": 966, "biters": 400, "on_kin": 0.9994724625539033, "kin_near": 0.9995156779568718}
+{"run": "b0-0012-t000", "batch": "b0-0012", "tile": 0, "cells": 52360, "biters": 3000, "on_kin": 0.901340333086669, "kin_near": 0.8523540358763982}
+{"run": "b0-0012-t001", "batch": "b0-0012", "tile": 1, "cells": 37502, "biters": 3000, "on_kin": 0.9521281564075585, "kin_near": 0.9253841839025211}
+{"run": "b0-0012-t002", "batch": "b0-0012", "tile": 2, "cells": 53154, "biters": 3000, "on_kin": 0.8648230387047203, "kin_near": 0.8761463750480407}
+{"run": "b0-0012-t003", "batch": "b0-0012", "tile": 3, "cells": 45990, "biters": 3000, "on_kin": 0.943592006203216, "kin_near": 0.9359112922803664}
+{"run": "b0-0012-t004", "batch": "b0-0012", "tile": 4, "cells": 34263, "biters": 3000, "on_kin": 0.948425475309432, "kin_near": 0.9269957429992509}
+{"run": "b0-0012-t005", "batch": "b0-0012", "tile": 5, "cells": 38588, "biters": 3000, "on_kin": 0.859726198301184, "kin_near": 0.8578107748166462}
+{"run": "b0-0012-t006", "batch": "b0-0012", "tile": 6, "cells": 17523, "biters": 3000, "on_kin": 0.956745575441456, "kin_near": 0.957519559194189}
+{"run": "b0-0012-t007", "batch": "b0-0012", "tile": 7, "cells": 50324, "biters": 3000, "on_kin": 0.7427718019139536, "kin_near": 0.7751146561753202}
+{"run": "b0-0012-t008", "batch": "b0-0012", "tile": 8, "cells": 32299, "biters": 3000, "on_kin": 0.9374719320803795, "kin_near": 0.9358573965346273}
+{"run": "b0-0012-t009", "batch": "b0-0012", "tile": 9, "cells": 48444, "biters": 3000, "on_kin": 0.8819624499498978, "kin_near": 0.8955279434206775}
+{"run": "b0-0012-t010", "batch": "b0-0012", "tile": 10, "cells": 24562, "biters": 3000, "on_kin": 0.818652400575605, "kin_near": 0.866958626294157}
+{"run": "b0-0012-t011", "batch": "b0-0012", "tile": 11, "cells": 17567, "biters": 3000, "on_kin": 0.8847378107009344, "kin_near": 0.8736046925410665}
+{"run": "b0-0012-t012", "batch": "b0-0012", "tile": 12, "cells": 27834, "biters": 3000, "on_kin": 0.7084857123920482, "kin_near": 0.7673876392762617}
+{"run": "b0-0012-t013", "batch": "b0-0012", "tile": 13, "cells": 10458, "biters": 3000, "on_kin": 0.6950678567232033, "kin_near": 0.6585999378576274}
+{"run": "b0-0012-t014", "batch": "b0-0012", "tile": 14, "cells": 18793, "biters": 3000, "on_kin": 0.5235329899391453, "kin_near": 0.6151910326870168}
+{"run": "b0-0012-t015", "batch": "b0-0012", "tile": 15, "cells": 14267, "biters": 3000, "on_kin": 0.5853266630644064, "kin_near": 0.5545357666135596}
+{"run": "b0-0013-t000", "batch": "b0-0013", "tile": 0, "cells": 2598, "biters": 1651, "on_kin": 0.6187488348864616, "kin_near": 0.6490632200733805}
+{"run": "b0-0013-t001", "batch": "b0-0013", "tile": 1, "cells": 9035, "biters": 3000, "on_kin": 0.41770960590971834, "kin_near": 0.45253551388711605}
+{"run": "b0-0013-t002", "batch": "b0-0013", "tile": 2, "cells": 3440, "biters": 2341, "on_kin": 0.7301254401241805, "kin_near": 0.717715940583083}
+{"run": "b0-0013-t003", "batch": "b0-0013", "tile": 3, "cells": 4403, "biters": 3000, "on_kin": 0.3974848426924771, "kin_near": 0.4271678752829048}
+{"run": "b0-0013-t004", "batch": "b0-0013", "tile": 4, "cells": 6094, "biters": 3000, "on_kin": 0.4223254604480206, "kin_near": 0.48659370843257577}
+{"run": "b0-0013-t005", "batch": "b0-0013", "tile": 5, "cells": 2212, "biters": 1315, "on_kin": 0.685719061823121, "kin_near": 0.7042176116260538}
+{"run": "b0-0013-t006", "batch": "b0-0013", "tile": 6, "cells": 4037, "biters": 3000, "on_kin": 0.44613339867029944, "kin_near": 0.37970786564116465}
+{"run": "b0-0013-t007", "batch": "b0-0013", "tile": 7, "cells": 1817, "biters": 877, "on_kin": 0.7272764161670378, "kin_near": 0.24384493176588787}
+{"run": "b0-0013-t008", "batch": "b0-0013", "tile": 8, "cells": 3751, "biters": 2381, "on_kin": 0.39263270677294904, "kin_near": 0.39265171526539283}
+{"run": "b0-0013-t009", "batch": "b0-0013", "tile": 9, "cells": 1313, "biters": 571, "on_kin": 0.6895081679210756, "kin_near": 0.679645339237745}
+{"run": "b0-0013-t010", "batch": "b0-0013", "tile": 10, "cells": 3262, "biters": 2076, "on_kin": 0.5042249795831006, "kin_near": 0.5385723093975447}
+{"run": "b0-0013-t011", "batch": "b0-0013", "tile": 11, "cells": 2332, "biters": 1482, "on_kin": 0.8277871660530077, "kin_near": 0.8264080322237128}
+{"run": "b0-0013-t012", "batch": "b0-0013", "tile": 12, "cells": 3725, "biters": 2939, "on_kin": 0.49799959090163465, "kin_near": 0.4402989891099124}
+{"run": "b0-0013-t013", "batch": "b0-0013", "tile": 13, "cells": 5549, "biters": 3000, "on_kin": 0.3903376557938167, "kin_near": 0.339475102153437}
+{"run": "b0-0013-t014", "batch": "b0-0013", "tile": 14, "cells": 2, "biters": 0}
+{"run": "b0-0013-t015", "batch": "b0-0013", "tile": 15, "cells": 2, "biters": 0}
+{"run": "b0-0014-t000", "batch": "b0-0014", "tile": 0, "cells": 1, "biters": 0}
+{"run": "b0-0014-t001", "batch": "b0-0014", "tile": 1, "cells": 3, "biters": 0}
+{"run": "b0-0014-t002", "batch": "b0-0014", "tile": 2, "cells": 0, "biters": 0}
+{"run": "b0-0014-t003", "batch": "b0-0014", "tile": 3, "cells": 5, "biters": 0}
+{"run": "b0-0014-t004", "batch": "b0-0014", "tile": 4, "cells": 1, "biters": 0}
+{"run": "b0-0014-t005", "batch": "b0-0014", "tile": 5, "cells": 1, "biters": 0}
+{"run": "b0-0014-t006", "batch": "b0-0014", "tile": 6, "cells": 4, "biters": 0}
+{"run": "b0-0014-t007", "batch": "b0-0014", "tile": 7, "cells": 3, "biters": 0}
+{"run": "b0-0014-t008", "batch": "b0-0014", "tile": 8, "cells": 8, "biters": 0}
+{"run": "b0-0014-t009", "batch": "b0-0014", "tile": 9, "cells": 3, "biters": 0}
+{"run": "b0-0014-t010", "batch": "b0-0014", "tile": 10, "cells": 8, "biters": 2, "on_kin": 1.0, "kin_near": 1.0}
+{"run": "b0-0014-t011", "batch": "b0-0014", "tile": 11, "cells": 4, "biters": 0}
+{"run": "b0-0014-t012", "batch": "b0-0014", "tile": 12, "cells": 5, "biters": 0}
+{"run": "b0-0014-t013", "batch": "b0-0014", "tile": 13, "cells": 5, "biters": 0}
+{"run": "b0-0014-t014", "batch": "b0-0014", "tile": 14, "cells": 2, "biters": 0}
+{"run": "b0-0014-t015", "batch": "b0-0014", "tile": 15, "cells": 1, "biters": 0}
+{"run": "b0-0015-t000", "batch": "b0-0015", "tile": 0, "cells": 16870, "biters": 3000, "on_kin": 0.6934871781715511, "kin_near": 0.6904252929734856}
+{"run": "b0-0015-t001", "batch": "b0-0015", "tile": 1, "cells": 18038, "biters": 3000, "on_kin": 0.852109629098825, "kin_near": 0.8561034728475441}
+{"run": "b0-0015-t002", "batch": "b0-0015", "tile": 2, "cells": 27582, "biters": 3000, "on_kin": 0.7310366911027922, "kin_near": 0.702570441230431}
+{"run": "b0-0015-t003", "batch": "b0-0015", "tile": 3, "cells": 8605, "biters": 3000, "on_kin": 0.679748482368333, "kin_near": 0.6589100276793236}
+{"run": "b0-0015-t004", "batch": "b0-0015", "tile": 4, "cells": 20280, "biters": 3000, "on_kin": 0.7800920753613333, "kin_near": 0.7847395753409121}
+{"run": "b0-0015-t005", "batch": "b0-0015", "tile": 5, "cells": 10802, "biters": 3000, "on_kin": 0.6031079439043026, "kin_near": 0.5756078718521334}
+{"run": "b0-0015-t006", "batch": "b0-0015", "tile": 6, "cells": 9523, "biters": 1496, "on_kin": 0.929787327737974, "kin_near": 0.8740557986748441}
+{"run": "b0-0015-t007", "batch": "b0-0015", "tile": 7, "cells": 11594, "biters": 3000, "on_kin": 0.43386286259541973, "kin_near": 0.49577165400092243}
+{"run": "b0-0015-t008", "batch": "b0-0015", "tile": 8, "cells": 6552, "biters": 2412, "on_kin": 0.39949287634330055, "kin_near": 0.4765360751245762}
+{"run": "b0-0015-t009", "batch": "b0-0015", "tile": 9, "cells": 5269, "biters": 1636, "on_kin": 0.8523805044621846, "kin_near": 0.8198672234031434}
+{"run": "b0-0015-t010", "batch": "b0-0015", "tile": 10, "cells": 9881, "biters": 3000, "on_kin": 0.6263023598463475, "kin_near": 0.6658281846062605}
+{"run": "b0-0015-t011", "batch": "b0-0015", "tile": 11, "cells": 10391, "biters": 3000, "on_kin": 0.7483506187591157, "kin_near": 0.739601484222842}
+{"run": "b0-0015-t012", "batch": "b0-0015", "tile": 12, "cells": 8065, "biters": 1841, "on_kin": 0.7368663830499554, "kin_near": 0.7361784774387721}
+{"run": "b0-0015-t013", "batch": "b0-0015", "tile": 13, "cells": 5435, "biters": 2438, "on_kin": 0.5459942483345687, "kin_near": 0.5410257884185841}
+{"run": "b0-0015-t014", "batch": "b0-0015", "tile": 14, "cells": 11308, "biters": 3000, "on_kin": 0.6794110285460513, "kin_near": 0.7066742421260861}
+{"run": "b0-0015-t015", "batch": "b0-0015", "tile": 15, "cells": 8334, "biters": 3000, "on_kin": 0.666589465185374, "kin_near": 0.6890019048558721}
+{"run": "b0-0016-t000", "batch": "b0-0016", "tile": 0, "cells": 2, "biters": 0}
+{"run": "b0-0016-t001", "batch": "b0-0016", "tile": 1, "cells": 2, "biters": 0}
+{"run": "b0-0016-t002", "batch": "b0-0016", "tile": 2, "cells": 1, "biters": 0}
+{"run": "b0-0016-t003", "batch": "b0-0016", "tile": 3, "cells": 1, "biters": 0}
+{"run": "b0-0016-t004", "batch": "b0-0016", "tile": 4, "cells": 2, "biters": 0}
+{"run": "b0-0016-t005", "batch": "b0-0016", "tile": 5, "cells": 1, "biters": 0}
+{"run": "b0-0016-t006", "batch": "b0-0016", "tile": 6, "cells": 4, "biters": 0}
+{"run": "b0-0016-t007", "batch": "b0-0016", "tile": 7, "cells": 0, "biters": 0}
+{"run": "b0-0016-t008", "batch": "b0-0016", "tile": 8, "cells": 1, "biters": 0}
+{"run": "b0-0016-t009", "batch": "b0-0016", "tile": 9, "cells": 2, "biters": 0}
+{"run": "b0-0016-t010", "batch": "b0-0016", "tile": 10, "cells": 0, "biters": 0}
+{"run": "b0-0016-t011", "batch": "b0-0016", "tile": 11, "cells": 2, "biters": 0}
+{"run": "b0-0016-t012", "batch": "b0-0016", "tile": 12, "cells": 0, "biters": 0}
+{"run": "b0-0016-t013", "batch": "b0-0016", "tile": 13, "cells": 2, "biters": 0}
+{"run": "b0-0016-t014", "batch": "b0-0016", "tile": 14, "cells": 0, "biters": 0}
+{"run": "b0-0016-t015", "batch": "b0-0016", "tile": 15, "cells": 0, "biters": 0}
+{"run": "b0-0017-t000", "batch": "b0-0017", "tile": 0, "cells": 229, "biters": 202, "on_kin": 0.9995932648276806, "kin_near": 1.0}
+{"run": "b0-0017-t001", "batch": "b0-0017", "tile": 1, "cells": 3172, "biters": 523, "on_kin": 0.586196828268752, "kin_near": 0.4746795428409314}
+{"run": "b0-0017-t002", "batch": "b0-0017", "tile": 2, "cells": 15765, "biters": 3000, "on_kin": 0.8329503494626934, "kin_near": 0.8319105188608797}
+{"run": "b0-0017-t003", "batch": "b0-0017", "tile": 3, "cells": 19731, "biters": 3000, "on_kin": 0.9304579624597512, "kin_near": 0.9344099132118152}
+{"run": "b0-0017-t004", "batch": "b0-0017", "tile": 4, "cells": 5645, "biters": 1418, "on_kin": 0.7880526610813395, "kin_near": 0.7649052015093195}
+{"run": "b0-0017-t005", "batch": "b0-0017", "tile": 5, "cells": 8145, "biters": 2494, "on_kin": 0.745398272747264, "kin_near": 0.7416137074011887}
+{"run": "b0-0017-t006", "batch": "b0-0017", "tile": 6, "cells": 8391, "biters": 969, "on_kin": 0.7549417715883486, "kin_near": 0.6797666517974975}
+{"run": "b0-0017-t007", "batch": "b0-0017", "tile": 7, "cells": 1438, "biters": 34, "on_kin": 0.19407723957935966, "kin_near": 0.20231293464108385}
+{"run": "b0-0017-t008", "batch": "b0-0017", "tile": 8, "cells": 1189, "biters": 164, "on_kin": 0.6125844786846938, "kin_near": 0.7798976696423314}
+{"run": "b0-0017-t009", "batch": "b0-0017", "tile": 9, "cells": 3357, "biters": 887, "on_kin": 0.8831576594510875, "kin_near": 0.8105629250961618}
+{"run": "b0-0017-t010", "batch": "b0-0017", "tile": 10, "cells": 2720, "biters": 400, "on_kin": 0.7656019024141468, "kin_near": 0.8954523022411639}
+{"run": "b0-0017-t011", "batch": "b0-0017", "tile": 11, "cells": 5376, "biters": 501, "on_kin": 0.7737446355577511, "kin_near": 0.8616011457856211}
+{"run": "b0-0017-t012", "batch": "b0-0017", "tile": 12, "cells": 4936, "biters": 481, "on_kin": 0.7845739159583737, "kin_near": 0.889772232899446}
+{"run": "b0-0017-t013", "batch": "b0-0017", "tile": 13, "cells": 1749, "biters": 445, "on_kin": 0.7660575365850685, "kin_near": 0.7486497716841526}
+{"run": "b0-0017-t014", "batch": "b0-0017", "tile": 14, "cells": 2915, "biters": 500, "on_kin": 0.8175000082223328, "kin_near": 0.7834649118765105}
+{"run": "b0-0017-t015", "batch": "b0-0017", "tile": 15, "cells": 4569, "biters": 986, "on_kin": 0.8251136265107635, "kin_near": 0.8133252299262577}
+{"run": "b0-0018-t000", "batch": "b0-0018", "tile": 0, "cells": 1, "biters": 0}
+{"run": "b0-0018-t001", "batch": "b0-0018", "tile": 1, "cells": 14, "biters": 9, "on_kin": 1.0, "kin_near": 1.0}
+{"run": "b0-0018-t002", "batch": "b0-0018", "tile": 2, "cells": 2, "biters": 0}
+{"run": "b0-0018-t003", "batch": "b0-0018", "tile": 3, "cells": 1, "biters": 0}
+{"run": "b0-0018-t004", "batch": "b0-0018", "tile": 4, "cells": 0, "biters": 0}
+{"run": "b0-0018-t005", "batch": "b0-0018", "tile": 5, "cells": 1, "biters": 0}
+{"run": "b0-0018-t006", "batch": "b0-0018", "tile": 6, "cells": 0, "biters": 0}
+{"run": "b0-0018-t007", "batch": "b0-0018", "tile": 7, "cells": 1, "biters": 0}
+{"run": "b0-0018-t008", "batch": "b0-0018", "tile": 8, "cells": 1, "biters": 0}
+{"run": "b0-0018-t009", "batch": "b0-0018", "tile": 9, "cells": 0, "biters": 0}
+{"run": "b0-0018-t010", "batch": "b0-0018", "tile": 10, "cells": 1, "biters": 0}
+{"run": "b0-0018-t011", "batch": "b0-0018", "tile": 11, "cells": 2, "biters": 0}
+{"run": "b0-0018-t012", "batch": "b0-0018", "tile": 12, "cells": 1, "biters": 0}
+{"run": "b0-0018-t013", "batch": "b0-0018", "tile": 13, "cells": 0, "biters": 0}
+{"run": "b0-0018-t014", "batch": "b0-0018", "tile": 14, "cells": 0, "biters": 0}
+{"run": "b0-0018-t015", "batch": "b0-0018", "tile": 15, "cells": 1, "biters": 0}
+{"run": "b0-0019-t000", "batch": "b0-0019", "tile": 0, "cells": 1, "biters": 0}
+{"run": "b0-0019-t001", "batch": "b0-0019", "tile": 1, "cells": 1, "biters": 0}
+{"run": "b0-0019-t002", "batch": "b0-0019", "tile": 2, "cells": 0, "biters": 0}
+{"run": "b0-0019-t003", "batch": "b0-0019", "tile": 3, "cells": 0, "biters": 0}
+{"run": "b0-0019-t004", "batch": "b0-0019", "tile": 4, "cells": 1, "biters": 0}
+{"run": "b0-0019-t005", "batch": "b0-0019", "tile": 5, "cells": 0, "biters": 0}
+{"run": "b0-0019-t006", "batch": "b0-0019", "tile": 6, "cells": 3, "biters": 0}
+{"run": "b0-0019-t007", "batch": "b0-0019", "tile": 7, "cells": 0, "biters": 0}
+{"run": "b0-0019-t008", "batch": "b0-0019", "tile": 8, "cells": 1, "biters": 0}
+{"run": "b0-0019-t009", "batch": "b0-0019", "tile": 9, "cells": 0, "biters": 0}
+{"run": "b0-0019-t010", "batch": "b0-0019", "tile": 10, "cells": 2, "biters": 0}
+{"run": "b0-0019-t011", "batch": "b0-0019", "tile": 11, "cells": 0, "biters": 0}
+{"run": "b0-0019-t012", "batch": "b0-0019", "tile": 12, "cells": 1, "biters": 0}
+{"run": "b0-0019-t013", "batch": "b0-0019", "tile": 13, "cells": 0, "biters": 0}
+{"run": "b0-0019-t014", "batch": "b0-0019", "tile": 14, "cells": 3, "biters": 0}
+{"run": "b0-0019-t015", "batch": "b0-0019", "tile": 15, "cells": 0, "biters": 0}
+{"run": "b0-0020-t000", "batch": "b0-0020", "tile": 0, "cells": 1, "biters": 0}
+{"run": "b0-0020-t001", "batch": "b0-0020", "tile": 1, "cells": 2100, "biters": 1602, "on_kin": 0.8471967924346451, "kin_near": 0.8577595494056179}
+{"run": "b0-0020-t002", "batch": "b0-0020", "tile": 2, "cells": 2845, "biters": 1901, "on_kin": 0.8493282913302596, "kin_near": 0.8470927925991688}
+{"run": "b0-0020-t003", "batch": "b0-0020", "tile": 3, "cells": 52, "biters": 47, "on_kin": 0.9995928985511692, "kin_near": 1.0}
+{"run": "b0-0020-t004", "batch": "b0-0020", "tile": 4, "cells": 2070, "biters": 1535, "on_kin": 0.8058649403284676, "kin_near": 0.8388682027384586}
+{"run": "b0-0020-t005", "batch": "b0-0020", "tile": 5, "cells": 1799, "biters": 1186, "on_kin": 0.9347071241231381, "kin_near": 0.9405614590515254}
+{"run": "b0-0020-t006", "batch": "b0-0020", "tile": 6, "cells": 2, "biters": 0}
+{"run": "b0-0020-t007", "batch": "b0-0020", "tile": 7, "cells": 2169, "biters": 1551, "on_kin": 0.928282180400185, "kin_near": 0.9199317306736199}
+{"run": "b0-0020-t008", "batch": "b0-0020", "tile": 8, "cells": 4566, "biters": 3000, "on_kin": 0.6664360684386842, "kin_near": 0.6722908090885329}
+{"run": "b0-0020-t009", "batch": "b0-0020", "tile": 9, "cells": 1141, "biters": 663, "on_kin": 0.9464023725624773, "kin_near": 0.9630877868388164}
+{"run": "b0-0020-t010", "batch": "b0-0020", "tile": 10, "cells": 1122, "biters": 690, "on_kin": 0.7794113586163783, "kin_near": 0.7649982625943299}
+{"run": "b0-0020-t011", "batch": "b0-0020", "tile": 11, "cells": 3308, "biters": 1785, "on_kin": 0.8299868160957595, "kin_near": 0.7997318461889015}
+{"run": "b0-0020-t012", "batch": "b0-0020", "tile": 12, "cells": 2646, "biters": 2082, "on_kin": 0.8148084711485123, "kin_near": 0.8060107442340585}
+{"run": "b0-0020-t013", "batch": "b0-0020", "tile": 13, "cells": 3368, "biters": 2691, "on_kin": 0.5255392004274225, "kin_near": 0.4812692621949286}
+{"run": "b0-0020-t014", "batch": "b0-0020", "tile": 14, "cells": 6, "biters": 1, "on_kin": 1.0, "kin_near": 1.0}
+{"run": "b0-0020-t015", "batch": "b0-0020", "tile": 15, "cells": 2441, "biters": 1859, "on_kin": 0.8873102959188995, "kin_near": 0.872008354550779}
+{"run": "b0-0021-t000", "batch": "b0-0021", "tile": 0, "cells": 13983, "biters": 3000, "on_kin": 0.8624782121732666, "kin_near": 0.8637780879093876}
+{"run": "b0-0021-t001", "batch": "b0-0021", "tile": 1, "cells": 18109, "biters": 3000, "on_kin": 0.8237917510409725, "kin_near": 0.913689680977495}
+{"run": "b0-0021-t002", "batch": "b0-0021", "tile": 2, "cells": 16159, "biters": 3000, "on_kin": 0.25620810520588594, "kin_near": 0.2956769475081753}
+{"run": "b0-0021-t003", "batch": "b0-0021", "tile": 3, "cells": 10193, "biters": 1772, "on_kin": 0.6227279181505676, "kin_near": 0.6232453457085652}
+{"run": "b0-0021-t004", "batch": "b0-0021", "tile": 4, "cells": 31167, "biters": 3000, "on_kin": 0.8770871294868795, "kin_near": 0.8990458198208203}
+{"run": "b0-0021-t005", "batch": "b0-0021", "tile": 5, "cells": 8766, "biters": 3000, "on_kin": 0.6214372728458373, "kin_near": 0.6479114485272409}
+{"run": "b0-0021-t006", "batch": "b0-0021", "tile": 6, "cells": 15431, "biters": 3000, "on_kin": 0.6521061919591249, "kin_near": 0.6810311776340886}
+{"run": "b0-0021-t007", "batch": "b0-0021", "tile": 7, "cells": 9514, "biters": 3000, "on_kin": 0.5542414629860495, "kin_near": 0.5133742737043374}
+{"run": "b0-0021-t008", "batch": "b0-0021", "tile": 8, "cells": 16315, "biters": 3000, "on_kin": 0.8064710069025568, "kin_near": 0.8513033296248667}
+{"run": "b0-0021-t009", "batch": "b0-0021", "tile": 9, "cells": 8509, "biters": 3000, "on_kin": 0.6219191137541503, "kin_near": 0.6910585926927956}
+{"run": "b0-0021-t010", "batch": "b0-0021", "tile": 10, "cells": 23570, "biters": 3000, "on_kin": 0.6318470324208486, "kin_near": 0.654768345144841}
+{"run": "b0-0021-t011", "batch": "b0-0021", "tile": 11, "cells": 4344, "biters": 1811, "on_kin": 0.6826726420174345, "kin_near": 0.7611611300170933}
+{"run": "b0-0021-t012", "batch": "b0-0021", "tile": 12, "cells": 25038, "biters": 3000, "on_kin": 0.6413233992463918, "kin_near": 0.6274282085247062}
+{"run": "b0-0021-t013", "batch": "b0-0021", "tile": 13, "cells": 6707, "biters": 1045, "on_kin": 0.541151064826408, "kin_near": 0.6085315959360842}
+{"run": "b0-0021-t014", "batch": "b0-0021", "tile": 14, "cells": 9077, "biters": 3000, "on_kin": 0.4076841477596298, "kin_near": 0.46347488319365243}
+{"run": "b0-0021-t015", "batch": "b0-0021", "tile": 15, "cells": 4299, "biters": 1293, "on_kin": 0.5020995958645618, "kin_near": 0.4886881463591633}
+{"run": "b0-0022-t000", "batch": "b0-0022", "tile": 0, "cells": 1, "biters": 0}
+{"run": "b0-0022-t001", "batch": "b0-0022", "tile": 1, "cells": 0, "biters": 0}
+{"run": "b0-0022-t002", "batch": "b0-0022", "tile": 2, "cells": 0, "biters": 0}
+{"run": "b0-0022-t003", "batch": "b0-0022", "tile": 3, "cells": 1, "biters": 0}
+{"run": "b0-0022-t004", "batch": "b0-0022", "tile": 4, "cells": 1, "biters": 0}
+{"run": "b0-0022-t005", "batch": "b0-0022", "tile": 5, "cells": 1, "biters": 0}
+{"run": "b0-0022-t006", "batch": "b0-0022", "tile": 6, "cells": 0, "biters": 0}
+{"run": "b0-0022-t007", "batch": "b0-0022", "tile": 7, "cells": 1, "biters": 0}
+{"run": "b0-0022-t008", "batch": "b0-0022", "tile": 8, "cells": 0, "biters": 0}
+{"run": "b0-0022-t009", "batch": "b0-0022", "tile": 9, "cells": 0, "biters": 0}
+{"run": "b0-0022-t010", "batch": "b0-0022", "tile": 10, "cells": 0, "biters": 0}
+{"run": "b0-0022-t011", "batch": "b0-0022", "tile": 11, "cells": 0, "biters": 0}
+{"run": "b0-0022-t012", "batch": "b0-0022", "tile": 12, "cells": 2, "biters": 0}
+{"run": "b0-0022-t013", "batch": "b0-0022", "tile": 13, "cells": 1, "biters": 0}
+{"run": "b0-0022-t014", "batch": "b0-0022", "tile": 14, "cells": 0, "biters": 0}
+{"run": "b0-0022-t015", "batch": "b0-0022", "tile": 15, "cells": 0, "biters": 0}
+{"run": "b0-0023-t000", "batch": "b0-0023", "tile": 0, "cells": 0, "biters": 0}
+{"run": "b0-0023-t001", "batch": "b0-0023", "tile": 1, "cells": 1, "biters": 0}
+{"run": "b0-0023-t002", "batch": "b0-0023", "tile": 2, "cells": 1, "biters": 0}
+{"run": "b0-0023-t003", "batch": "b0-0023", "tile": 3, "cells": 0, "biters": 0}
+{"run": "b0-0023-t004", "batch": "b0-0023", "tile": 4, "cells": 0, "biters": 0}
+{"run": "b0-0023-t005", "batch": "b0-0023", "tile": 5, "cells": 1, "biters": 0}
+{"run": "b0-0023-t006", "batch": "b0-0023", "tile": 6, "cells": 3, "biters": 0}
+{"run": "b0-0023-t007", "batch": "b0-0023", "tile": 7, "cells": 3, "biters": 0}
+{"run": "b0-0023-t008", "batch": "b0-0023", "tile": 8, "cells": 2, "biters": 0}
+{"run": "b0-0023-t009", "batch": "b0-0023", "tile": 9, "cells": 3, "biters": 0}
+{"run": "b0-0023-t010", "batch": "b0-0023", "tile": 10, "cells": 3, "biters": 0}
+{"run": "b0-0023-t011", "batch": "b0-0023", "tile": 11, "cells": 1, "biters": 0}
+{"run": "b0-0023-t012", "batch": "b0-0023", "tile": 12, "cells": 1, "biters": 0}
+{"run": "b0-0023-t013", "batch": "b0-0023", "tile": 13, "cells": 1, "biters": 0}
+{"run": "b0-0023-t014", "batch": "b0-0023", "tile": 14, "cells": 2, "biters": 0}
+{"run": "b0-0023-t015", "batch": "b0-0023", "tile": 15, "cells": 1, "biters": 0}
