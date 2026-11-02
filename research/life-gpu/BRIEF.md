@@ -12,7 +12,7 @@ Good physics usually means a trade-off no cell can escape, so that no single way
 
 ## The engine
 
-`crates/auto-life-gpu/`. One cell per square, each with its own RNN of 672 8-bit weights and 8 memory units. Each tick a cell senses, thinks, then splits its energy across rest, move, ground, meat, grow, emit, heat, bite, give, enzyme, plus two free slots.
+`crates/auto-life-gpu/`. One cell per square, each with its own RNN of 864 8-bit weights and 8 memory units. Each tick a cell senses, thinks, then splits its energy across rest, move, ground, meat, grow, emit, heat, bite, give, enzyme, armour, clean, plus four free slots.
 
 Everything you need to change is plain text. **You do not need to run cargo, and must not.** Every key in `shaders/defaults.json` becomes a WGSL constant: a number `foo_bar` becomes `FOO_BAR: f32`, and a switch becomes `FOO_BAR: bool` and `FOO_BAR_F` (1.0 or 0.0). A key ending in `_decay` also gives `STEM_DECAY_KEEP`.
 
@@ -22,17 +22,17 @@ Everything you need to change is plain text. **You do not need to run cargo, and
 | `shaders/sweep.wgsl` | Field physics: diffusion, decay, sun, rot. Runs twice a tick |
 | `shaders/births.wgsl` | Writes a child's genome: crossover, mutation |
 | `shaders/rain.wgsl` | Occasional random newcomers |
-| `shaders/terrain.wgsl` | Builds the world. The word per square holds sun (16 bits), season phase (8), rock (bit 24), biome (4 bits from bit 28) |
+| `shaders/terrain.wgsl` | Builds the world. The word per square holds sun (16 bits), season phase (8), rock (bit 24), and from bit 28 the 4 bits of the room when biomes or walls are on |
 | `shaders/view.wgsl` | Colours for the video |
 
-Spare capacity reserved for you, so no Rust changes are needed:
+Ten rules already exist, all off by default. `research/life-gpu/RULES.md` lists each one and the layout. Spare capacity reserved for you, so no Rust changes are needed, except that a new input or output must be added to `input_live` or `output_live` in `config.rs`:
 
-- Per-cell state: `c.x0`, `c.x1`, `c.x2`, `c.x3`. `x0` is already input `i1.w`, `x1` is input `i12.w`. Children copy `x0` and `x1` from the parent in `act.wgsl`, and you can change that.
-- Two free budget actions: turn on `x0_on` or `x1_on`. In `act.wgsl`, `a2.z` and `w2.z` are the energy and the effective work for x0, `a2.w` and `w2.w` for x1.
-- Two free brain outputs: `o5.z` and `o5.w`.
-- Three free fields: `fc.y`, `fc.z`, `fc.w`, with `fcy_flow`, `fcy_decay` and so on. `fc.y` is already sensed: `i12.x` is its level, `i12.y` and `i12.z` its gradient.
+- Per-cell state: `c.x0`, `c.x1`, `c.x2`, `c.x3`. They start at 0, and children get nothing unless you copy it.
+- Four free budget actions: turn on `x0_on` to `x3_on`. In `act.wgsl`, `s3` holds their share, and you work out their energy as `s3 * spend_here * scale`. They come from output row `o6`.
+- Two more free brain outputs: `o5.z` and `o5.w`.
+- Free inputs: `i12.w`, `i13.w`, and blocks `i15`, `i16`, `i17`.
+- Free fields: `fc.w`, with `fcw_flow` and `fcw_decay`, and `fd.y`, `fd.z`, `fd.w`, for which you set flow and decay in `sweep.wgsl` and switch on `FD_ON`.
 - Counters: `ctr[C_X0]` to `ctr[C_X0 + 15]`, shown in the log only if you read them out, so prefer the existing measures.
-- Terrain biome bits, unused so far.
 
 Limits on what a dispatch may touch, or results go wrong silently: cells on the same dispatch are 4 squares apart. A cell may **write** only its own square and squares 1 away, and **read** up to 2 away, from the square where its tick began. `seen` is a read-only snapshot and can be read at any distance. WGSL has no closures, and function-local arrays are about ten times slower, so spell things out with vec4s. Keep the energy ledger honest: if energy leaves a cell or the ground and doesn't go elsewhere, call `lose(x)`. Energy must never appear from nothing.
 

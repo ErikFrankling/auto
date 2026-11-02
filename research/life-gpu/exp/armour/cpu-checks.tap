@@ -1,0 +1,24 @@
+ok 1 - extract actual WGSL rule
+ok 2 - CPU heat reference hardness 0
+ok 3 - CPU bite reference hardness 0
+ok 4 - CPU construction reference hardness 0 before cap
+ok 5 - CPU heat reference hardness 0.25
+ok 6 - CPU bite reference hardness 0.25
+ok 7 - CPU construction reference hardness 0.25 before cap
+ok 8 - CPU heat reference hardness 0.5
+ok 9 - CPU bite reference hardness 0.5
+ok 10 - CPU construction reference hardness 0.5 before cap
+ok 11 - CPU heat reference hardness 1
+ok 12 - CPU bite reference hardness 1
+ok 13 - CPU construction reference hardness 1 before cap
+ok 14 - no free inherited armour
+ok 15 - upkeep dissipates through ledger
+ok 16 - construction dissipates through action ledger
+ok 17 - experiment defaults off
+ok 18 - CPU movement reference 0
+ok 19 - CPU extra upkeep reference 0
+ok 20 - CPU movement reference 0.5
+ok 21 - CPU extra upkeep reference 0.5
+ok 22 - CPU movement reference 1
+ok 23 - CPU extra upkeep reference 1
+1..23

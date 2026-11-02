@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """The screen: many small worlds, each with its own seed and physics, measured the same way.
 
-  life_screen.py queue NAME COUNT [--size 256] [--ticks 120000] [--controls N] [--priority PREFIX]
+  life_screen.py queue NAME COUNT [--size 256] [--ticks 120000] [--controls N] [--priority PREFIX] [--rule-chance 0.3]
   life_screen.py analyse     keeps measuring finished runs until none are left to wait for
   life_screen.py rank        prints the worlds that stand out
 
 Runs are small on purpose, so hundreds fit. What holds up here gets scaled up.
-Every physics setting is sampled around its default. Nothing here feeds into a world.
+Every physics setting is sampled around its default, and each rule in research/life-gpu/RULES.md
+is on by chance, with its settings sampled too. Nothing here feeds into a world.
 """
 import json
 import math
@@ -53,24 +54,108 @@ RANGES = {
     "give_power": (2, 20, True),
     "share_rate": (0.02, 0.4, True),
     "p0_decay": (0.001, 0.02, True),
-    "compat": (0, 0, False),
+    # Below here, only for rules, and sampled only when their rule is on. Ranges come from
+    # each experiment's README, and most of them are guesses that have not been tested.
+    "compat": (0.25, 0.8, False),
+    "mass_drag": (0.3, 3, True),
+    "mass_step_cost": (0.01, 0.1, True),
+    "mass_push_cost": (0.02, 0.2, True),
+    "armour_build": (0.5, 3, True),
+    "armour_fade": (0.002, 0.02, True),
+    "armour_resist": (1, 6, True),
+    "armour_drag": (1, 6, True),
+    "armour_upkeep": (0.01, 0.06, True),
+    "pack_intact": (0.05, 0.5, True),
+    "pack_wound_keep": (0.5, 0.9, False),
+    "pack_wound_rate": (4, 24, True),
+    "waste_harm": (0.01, 0.08, True),
+    "waste_deposit": (0.05, 0.2, True),
+    "waste_holds": (0.1, 0.4, False),
+    "waste_decay": (0.001, 0.01, True),
+    "waste_flow": (0.005, 0.1, True),
+    "plants_peak": (1.5, 3, False),
+    "weather_drift": (0.003, 0.03, True),
+    "weather_fire_rate": (1e-9, 1e-8, True),
+    "weather_fire_rest": (500, 4000, True),
+    "mate_pay": (0.3, 0.7, False),
+    "skill_naive": (0.6, 0.95, False),
+    "skill_curve": (1, 4, False),
+    "skill_inherit": (0, 1, False),
+    "wall_pass": (4, 64, True),
+    "wall_thick": (2, 8, False),
+    "bloom_share": (0.3, 0.7, False),
+    "bloom_fade": (0.005, 0.02, True),
+    "track_decay": (0.0005, 0.01, True),
+    "track_flow": (0.001, 0.02, True),
+    "road_ease": (1, 6, False),
 }
 
+# The rules. Each is (switches set when it's on, settings sampled from RANGES, switches
+# chosen by chance). Rules that hold only a number start from zero, so that's their switch.
+RULES = {
+    "mass": ({"mass_on": True}, ["mass_drag", "mass_step_cost", "mass_push_cost"], []),
+    "armour": ({"armour_on": True}, ["armour_build", "armour_fade", "armour_resist", "armour_drag", "armour_upkeep"], []),
+    "pack": ({"pack_on": True}, ["pack_intact", "pack_wound_keep", "pack_wound_rate"], []),
+    "waste": ({"waste_on": True}, ["waste_harm", "waste_deposit", "waste_decay", "waste_flow"], ["waste_clean"]),
+    "plants": ({"plants_on": True}, ["plants_peak"], []),
+    "sun_drift": ({"weather_sun_on": True}, ["weather_drift"], []),
+    "fire": ({"weather_fire_on": True}, ["weather_fire_rate", "weather_fire_rest"], []),
+    "mate_pay": ({}, ["mate_pay"], []),
+    "compat": ({}, ["compat"], []),
+    "skills": ({"skill_on": True}, ["skill_naive", "skill_curve", "skill_inherit"], ["skill_sense"]),
+    "biomes": ({"biomes_on": True}, [], ["biome_feel"]),
+    "walls": ({"walls_on": True}, ["wall_pass", "wall_thick"], []),
+    "blooms": ({}, ["bloom_share", "bloom_fade"], []),
+    "roads": ({"roads_on": True}, ["track_decay", "track_flow", "road_ease"], []),
+}
+# Settings that belong to a rule, so a world without that rule doesn't vary them.
+RULE_ONLY = {k for _, keys, _ in RULES.values() for k in keys} | {"waste_holds"}
 
-def sample(rng, how_many):
-    """A handful of changes from default, so a result can still be traced to something."""
-    keys = rng.sample(sorted(k for k in RANGES if k != "compat"), how_many)
+
+def draw(rng, key):
+    lo, hi, log = RANGES[key]
+    v = math.exp(rng.uniform(math.log(lo), math.log(hi))) if log else rng.uniform(lo, hi)
+    return float(f"{v:.4g}")
+
+
+def sample_rules(rng, chance, size):
+    """Turns each rule on by chance, with its settings. Lengths and rates are given for a world
+    512 wide, the size the experiments ran at, and scale here to keep the same meaning."""
     out = {}
-    for k in keys:
-        lo, hi, log = RANGES[k]
-        v = math.exp(rng.uniform(math.log(lo), math.log(hi))) if log else rng.uniform(lo, hi)
-        out[k] = float(f"{v:.4g}")
-    if rng.random() < 0.25:
-        out["compat"] = float(f"{rng.uniform(0.25, 0.8):.3g}")
+    for rule in sorted(RULES):
+        if rng.random() >= chance:
+            continue
+        switches, keys, optional = RULES[rule]
+        out.update(switches)
+        for k in keys:
+            out[k] = draw(rng, k)
+        for k in optional:
+            out[k] = rng.random() < 0.5
+    if out.get("waste_clean"):
+        out["waste_holds"] = draw(rng, "waste_holds")
+    if "weather_fire_rate" in out:
+        out["weather_fire_rate"] = float(f"{out['weather_fire_rate'] * (512 / size) ** 2:.4g}")
+    if out.get("walls_on"):
+        for k in ("wall_pass", "wall_thick"):
+            out[k] = float(f"{max(out[k] * size / 512, 1):.4g}")
     return out
 
 
-def queue(name, count, size, ticks, controls, priority):
+def sample(rng, how_many, rule_chance=0.3, size=256):
+    """A handful of changes from default, so a result can still be traced to something, and
+    any rules that came up."""
+    keys = rng.sample(sorted(k for k in RANGES if k not in RULE_ONLY), how_many)
+    out = {k: draw(rng, k) for k in keys}
+    out.update(sample_rules(rng, rule_chance, size))
+    return out
+
+
+def set_flags(physics):
+    """As --set flags. Switches need lower case, or the binary refuses them."""
+    return " ".join(f"--set {k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in physics.items())
+
+
+def queue(name, count, size, ticks, controls, priority, rule_chance=0.3):
     RUNS.mkdir(parents=True, exist_ok=True)
     shaders = RUNS / f"shaders-{name}"
     if not shaders.exists():
@@ -81,9 +166,9 @@ def queue(name, count, size, ticks, controls, priority):
         d = RUNS / run
         d.mkdir(parents=True, exist_ok=True)
         seed = rng.randrange(1, 2**31)
-        physics = {} if i < controls else sample(rng, rng.randint(1, 6))
+        physics = {} if i < controls else sample(rng, rng.randint(1, 6), rule_chance, size)
         (d / "spec.json").write_text(json.dumps({"run": run, "seed": seed, "size": size, "ticks": ticks, "physics": physics}))
-        sets = " ".join(f"--set {k}={v}" for k, v in physics.items())
+        sets = set_flags(physics)
         # An exit from a world that dies out still counts: dead worlds are a result.
         cmd = (
             f"{BIN} --shaders {shaders} --size {size} --seed {seed} {sets} --ticks {ticks} --log-every {ticks // 8}"
@@ -128,7 +213,8 @@ def features(d):
         mixed=l["births_mixed"] / max(l["births"], 1),
         species=l.get("effective_species"), species_at=l.get("species_at"),
         explain=l.get("species_explain_behaviour"), explain_scaled=l.get("species_explain_scaled"),
-        budget={k: w["budget"][k] for k in ("rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme")},
+        budget={k: w["budget"][k] for k in ("rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme", "armour", "clean")},
+        hardness=w.get("hardness"), wound=w.get("wound"), practice=w.get("practice"),
         follows_scent=w["follows_scent"], hist=l.get("from_other_cells_hist"), founders=l.get("founder_lines"),
         no_slot=l.get("births_no_slot"),
     )
@@ -220,7 +306,7 @@ def main():
         print(__doc__)
     elif a[0] == "queue":
         opt = lambda n, d: type(d)(a[a.index(n) + 1]) if n in a else d
-        queue(a[1], int(a[2]), opt("--size", 256), opt("--ticks", 120000), opt("--controls", 0), opt("--priority", "0-s"))
+        queue(a[1], int(a[2]), opt("--size", 256), opt("--ticks", 120000), opt("--controls", 0), opt("--priority", "0-s"), opt("--rule-chance", 0.3))
     elif a[0] == "analyse":
         idle = 0
         while idle < 2880:

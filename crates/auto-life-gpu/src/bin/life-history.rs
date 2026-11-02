@@ -9,9 +9,15 @@
 use serde_json::{Value, json};
 use std::io::Read;
 
-const IN_BLOCKS: usize = 13;
-const OUT_ROWS: usize = 6;
-const ACTIONS: [&str; 10] = ["rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme"];
+const IN_BLOCKS: usize = auto_life_gpu::config::IN_BLOCKS as usize;
+const OUT_ROWS: usize = auto_life_gpu::config::OUT_ROWS as usize;
+const CELL_BYTES: usize = auto_life_gpu::config::CELL_BYTES as usize;
+const STAT_BYTES: usize = auto_life_gpu::config::STAT_BYTES as usize;
+const ACTIONS: [&str; 12] = [
+    "rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme", "armour", "clean",
+];
+/// Whether the armour and clean actions exist in this run. Set once, from a dump.
+static RULE_ACTIONS: std::sync::OnceLock<[bool; 2]> = std::sync::OnceLock::new();
 
 struct Rng(u64);
 impl Rng {
@@ -32,7 +38,7 @@ impl Rng {
 
 struct Cell {
     diet: [f32; 4],
-    budget: [f32; 10],
+    budget: [f32; 12],
     moving: f32,
     crowd: f32,
     age: f32,
@@ -66,7 +72,7 @@ fn bt(g: &[f32], block: usize, v: &[f32; 4]) -> [f32; 4] {
 
 type Inputs = [[f32; 4]; IN_BLOCKS];
 
-fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 10], f32, f32) {
+fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 12], f32, f32) {
     let hh = hr * IN_BLOCKS;
     let ho = hh + hr * hr;
     let mut mem = vec![[0.0f32; 4]; hr];
@@ -104,11 +110,14 @@ fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 10], f32, f32) {
     }
     let raw = [out[0][0], out[0][1], out[0][2], out[0][3], out[1][0], out[1][1], out[1][2], out[1][3], out[2][0], out[2][1], out[2][2], out[2][3]];
     let top = raw.iter().cloned().fold(f32::MIN, f32::max);
-    let mut s = [0.0f32; 10];
+    let on = RULE_ACTIONS.get().copied().unwrap_or([false; 2]);
+    let mut s = [0.0f32; 12];
     let mut z = 0.0;
-    for i in 0..10 {
-        s[i] = (raw[i] - top).clamp(-20.0, 0.0).exp();
-        z += s[i];
+    for i in 0..12 {
+        if i < 10 || on[i - 10] {
+            s[i] = (raw[i] - top).clamp(-20.0, 0.0).exp();
+            z += s[i];
+        }
     }
     s.iter_mut().for_each(|v| *v /= z);
     (s, out[3][0], out[3][1])
@@ -169,6 +178,13 @@ fn read_dump(path: &std::path::Path, tests: &[Inputs]) -> Option<(Dump, usize)> 
     let mut head = vec![0u8; u64::from_le_bytes(len) as usize];
     f.read_exact(&mut head).ok()?;
     let head: Value = serde_json::from_slice(&head).ok()?;
+    if let Err(why) = auto_life_gpu::config::check_layout(&head, &path.display().to_string()) {
+        eprintln!("{why}");
+        std::process::exit(2);
+    }
+    let on = |k: &str| head["physics"][k].as_bool().unwrap_or(false);
+    let rule_actions = [on("armour_on"), on("waste_on") && on("waste_clean")];
+    let _ = RULE_ACTIONS.set(rule_actions);
     let size = head["size"].as_u64()? as usize;
     let count = head["count"].as_u64()? as usize;
     let gb = head["genome_bytes"].as_u64()? as usize;
@@ -176,19 +192,26 @@ fn read_dump(path: &std::path::Path, tests: &[Inputs]) -> Option<(Dump, usize)> 
     let mut map = vec![0u8; size * size / 8 + 1];
     f.read_exact(&mut map).ok()?;
     let mut cells = Vec::with_capacity(count);
-    let mut rec = vec![0u8; 64 + 112 + gb];
+    let mut rec = vec![0u8; CELL_BYTES + STAT_BYTES + gb];
     for _ in 0..count {
         f.read_exact(&mut rec).ok()?;
-        let u: &[u32] = &bytemuck::pod_collect_to_vec::<u8, u32>(&rec[..64]);
-        let st: Vec<f32> = bytemuck::pod_collect_to_vec::<u8, f32>(&rec[64..176]);
-        let genome: Vec<f32> = rec[176..].iter().map(|b| (*b as i8 as f32 / 127.0).max(-1.0)).collect();
-        let mut print = Vec::with_capacity(tests.len() * 10);
+        let u: &[u32] = &bytemuck::pod_collect_to_vec::<u8, u32>(&rec[..CELL_BYTES]);
+        let st: Vec<f32> = bytemuck::pod_collect_to_vec::<u8, f32>(&rec[CELL_BYTES..CELL_BYTES + STAT_BYTES]);
+        let genome: Vec<f32> = rec[CELL_BYTES + STAT_BYTES..].iter().map(|b| (*b as i8 as f32 / 127.0).max(-1.0)).collect();
+        let mut print = Vec::with_capacity(tests.len() * 12);
         for t in tests {
-            print.extend_from_slice(&act(&genome, hr, t).0);
+            let shares = act(&genome, hr, t).0;
+            print.extend_from_slice(&shares[..10]);
+            // Only actions that exist count, so a rule that's off doesn't change the measure.
+            for k in 0..2 {
+                if rule_actions[k] {
+                    print.push(shares[10 + k]);
+                }
+            }
         }
         cells.push(Cell {
             diet: st[0..4].try_into().unwrap(),
-            budget: st[4..14].try_into().unwrap(),
+            budget: st[4..16].try_into().unwrap(),
             moving: st[19],
             crowd: st[24] * 8.0,
             age: f32::from_bits(u[2]),
@@ -327,7 +350,7 @@ fn top_axes(data: &[&[f32]], count: usize) -> (Vec<Vec<f32>>, Vec<f32>) {
 }
 
 /// A plain description from the numbers. Only for reading results.
-fn label(diet: &[f32; 4], moving: f32, budget: &[f32; 10]) -> String {
+fn label(diet: &[f32; 4], moving: f32, budget: &[f32; 12]) -> String {
     let t = diet.iter().sum::<f32>().max(1e-6);
     let (ground, meat, bite) = (diet[0] / t, diet[1] / t, diet[2] / t);
     let food = if bite >= 0.4 {
@@ -419,7 +442,7 @@ fn main() {
     // Each strategy over time, with how it lives.
     let mut share = vec![vec![0.0f32; dumps.len()]; k];
     let mut diet = vec![[0.0f32; 4]; k];
-    let mut budget = vec![[0.0f32; 10]; k];
+    let mut budget = vec![[0.0f32; 12]; k];
     let mut moving = vec![0.0f32; k];
     let mut crowd = vec![0.0f32; k];
     let mut age = vec![0.0f32; k];
@@ -433,7 +456,7 @@ fn main() {
             for a in 0..4 {
                 diet[s][a] += c.diet[a];
             }
-            for a in 0..10 {
+            for a in 0..12 {
                 budget[s][a] += c.budget[a];
             }
             moving[s] += c.moving;
@@ -446,11 +469,11 @@ fn main() {
     let mut strategies = vec![];
     for s in 0..k {
         let m = count[s].max(1.0);
-        let b: [f32; 10] = std::array::from_fn(|a| budget[s][a] / m);
+        let b: [f32; 12] = std::array::from_fn(|a| budget[s][a] / m);
         let t: f32 = diet[s].iter().sum::<f32>().max(1e-6);
         let peak = share[s].iter().cloned().fold(0.0f32, f32::max);
         let mut bud = serde_json::Map::new();
-        for a in 0..10 {
+        for a in 0..12 {
             bud.insert(ACTIONS[a].into(), json!((b[a] * 1000.0).round() / 1000.0));
         }
         strategies.push(json!({

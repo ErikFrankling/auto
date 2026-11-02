@@ -19,6 +19,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "research/life-gpu/analysis"
 MEDIA = ROOT / "videos/life-gpu/maps"
+# What this reads. Worlds from an older layout are refused, not read as garbage.
+LAYOUT = {"in_blocks": 18, "out_rows": 7, "cell_bytes": 96, "stat_bytes": 144}
+CELL_WORDS = LAYOUT["cell_bytes"] // 4
+STAT_WORDS = LAYOUT["stat_bytes"] // 4
 NONE = 0xFFFFFFFF
 FFMPEG = "ffmpeg"
 
@@ -51,7 +55,9 @@ def kind_of(c):
 
 def sections(head):
     size, slots, hr = head["size"], head["slots"], head["hidden_rows"]
-    blocks = hr * (13 + hr + 6)
+    if head.get("layout") != LAYOUT:
+        sys.exit(f"this world has layout {head.get('layout') or 'older: 13 input blocks, 6 output rows, 64-byte cells'}, and this script reads {LAYOUT}")
+    blocks = hr * (LAYOUT["in_blocks"] + hr + LAYOUT["out_rows"])
     shard = head.get("shard_slots") or (2**31) // (blocks * 16)
     squares = size * size
     ring = 1
@@ -59,8 +65,8 @@ def sections(head):
         ring *= 2
     out = [
         ("occ", squares * 4), ("seen", squares * 4), ("seen_next", squares * 4), ("terrain", squares * 4),
-        ("fa", squares * 16), ("fb", squares * 16), ("fc", squares * 16),
-        ("cell", slots * 64), ("stat", slots * 112), ("sketch", slots * 16), ("mem", slots * hr * 16),
+        ("fa", squares * 16), ("fb", squares * 16), ("fc", squares * 16), ("fd", squares * 16),
+        ("cell", slots * LAYOUT["cell_bytes"]), ("stat", slots * LAYOUT["stat_bytes"]), ("sketch", slots * 16), ("mem", slots * hr * 16),
         ("genome", min(slots, shard) * blocks * 16),
     ]
     if slots > shard:
@@ -112,11 +118,11 @@ def analyse(name, path, max_cells=120000):
     by_square = {}
     for p, s in picked:
         c = dict(
-            p=p, s=s, e=cell_f[s * 16], womb=cell_f[s * 16 + 1], age=cell_f[s * 16 + 2],
-            voice=(cell_f[s * 16 + 8], cell_f[s * 16 + 9]), flags=cell_u[s * 16 + 11], clade=cell_u[s * 16 + 12],
-            gen=cell_u[s * 16 + 13],
+            p=p, s=s, e=cell_f[s * CELL_WORDS], womb=cell_f[s * CELL_WORDS + 1], age=cell_f[s * CELL_WORDS + 2],
+            voice=(cell_f[s * CELL_WORDS + 8], cell_f[s * CELL_WORDS + 9]), flags=cell_u[s * CELL_WORDS + 11], clade=cell_u[s * CELL_WORDS + 12],
+            gen=cell_u[s * CELL_WORDS + 13],
         )
-        st = stat[s * 28 : s * 28 + 28]
+        st = stat[s * STAT_WORDS : s * STAT_WORDS + STAT_WORDS]
         c["diet"] = list(st[0:4])
         c["budget"] = list(st[4:16])
         c["rest"] = st[4]

@@ -2,175 +2,20 @@
 //! written as plain Rust. They run on whatever Vulkan device is there, and CI uses
 //! a software driver.
 
-use auto_life_gpu::config::{IN_BLOCKS, OUT_ROWS};
+mod common;
+
+use auto_life_gpu::config::{CELL_BYTES, IN_BLOCKS, OUT_ROWS, STAT_BYTES};
 use auto_life_gpu::{Config, Pacing, World};
-
-const ROCK: u32 = u32::MAX;
-const NONE: u32 = u32::MAX;
-
-fn world_with(size: u32, seed: u32, sets: &[(&str, &str)]) -> World {
-    let mut cfg = Config::new(size, seed, None).unwrap();
-    for (k, v) in sets {
-        cfg.set(k, v).unwrap();
-    }
-    World::new(
-        cfg,
-        Pacing {
-            target_ms: 50.0,
-            duty: 1.0,
-        },
-    )
-    .unwrap()
-}
-
-/// A still world: nothing grows, flows, rots or lands, so a tick's effects can be read off directly.
-fn still_world(size: u32) -> World {
-    still_world_with(size, &[])
-}
-
-fn still_world_with(size: u32, more: &[(&str, &str)]) -> World {
-    let mut sets: Vec<(&str, &str)> = vec![
-        ("sun", "0"),
-        ("rock", "false"),
-        ("season_ticks", "0"),
-        ("rain_p", "0"),
-        ("rain_burst_ticks", "0"),
-        ("hazard", "0"),
-        ("mut_rate", "0"),
-        ("noise_on", "false"),
-        ("meat_flow", "0"),
-        ("meat_rot", "0"),
-        ("heat_flow", "0"),
-        ("heat_decay", "0"),
-        ("enzyme_flow", "0"),
-        ("enzyme_decay", "0"),
-        ("p0_flow", "0"),
-        ("p0_decay", "0"),
-        ("p1_flow", "0"),
-        ("p1_decay", "0"),
-        ("p2_flow", "0"),
-        ("p2_decay", "0"),
-        ("p3_flow", "0"),
-        ("p3_decay", "0"),
-    ];
-    sets.extend_from_slice(more);
-    world_with(size, 7, &sets)
-}
-
-fn f32_at(rec: &[u32; 16], k: usize) -> f32 {
-    f32::from_bits(rec[k])
-}
+use common::*;
 
 #[test]
 fn energy_adds_up() {
-    let mut w = world_with(64, 3, &[("ledger", "true")]);
-    let start: f64 = w
-        .read_vec4s("fa")
-        .iter()
-        .map(|v| v[0] as f64 + v[1] as f64)
-        .sum();
-    for _ in 0..800 {
-        w.step();
-    }
-    w.flush();
-    assert!(w.alive() > 0, "the world should have life in it");
-    let c = w.counters();
-    let scale = 4096.0f64;
-    let (lost, sun, rain) = (
-        c[10] as f64 / scale,
-        c[11] as f64 / scale,
-        c[12] as f64 / scale,
-    );
-    let fields: f64 = w
-        .read_vec4s("fa")
-        .iter()
-        .map(|v| v[0] as f64 + v[1] as f64)
-        .sum();
-    let body = w.cfg.f("body") as f64;
-    let cells: f64 = w
-        .read_cells()
-        .iter()
-        .filter(|r| r[10] != NONE)
-        .map(|r| f32_at(r, 0).max(0.0) as f64 + f32_at(r, 1) as f64 + body)
-        .sum();
-    let have = fields + cells + lost;
-    let put_in = start + sun + rain;
-    let gap = (have - put_in).abs() / put_in;
-    assert!(gap < 0.005, "have {have}, put in {put_in}, gap {gap}");
+    assert_energy_adds_up(&[]);
 }
 
 #[test]
 fn grid_and_cells_agree() {
-    let mut w = world_with(64, 5, &[]);
-    for _ in 0..600 {
-        w.step();
-    }
-    w.flush();
-    let occ = w.read_u32s("occ");
-    let cells = w.read_cells();
-    let mut on_grid = 0;
-    for (p, o) in occ.iter().enumerate() {
-        if *o == 0 || *o == ROCK {
-            continue;
-        }
-        on_grid += 1;
-        assert_eq!(
-            cells[*o as usize - 1][10] as usize,
-            p,
-            "cell's own idea of where it is"
-        );
-    }
-    let live = cells.iter().filter(|r| r[10] != NONE).count();
-    assert_eq!(on_grid, live);
-    assert_eq!(on_grid as u32, w.alive());
-    assert!(on_grid > 0);
-
-    // Every slot is either in use or in the free ring, never both.
-    let ring = w.read_u32s("ring");
-    let c = w.counters();
-    let mask = ring.len() as u32 - 1;
-    let ctl = w.read_u32s("ctl");
-    let mut tail = c[1];
-    if (tail.wrapping_sub(ctl[0]) as i32) > 0 {
-        tail = ctl[0];
-    }
-    let mut free = std::collections::HashSet::new();
-    let mut t = tail;
-    while t != c[0] {
-        assert!(free.insert(ring[(t & mask) as usize]), "slot freed twice");
-        t = t.wrapping_add(1);
-    }
-    for o in &occ {
-        if *o != 0 && *o != ROCK {
-            assert!(!free.contains(&(*o - 1)), "live slot on the free ring");
-        }
-    }
-    assert_eq!(free.len() + on_grid, w.cfg.slots as usize);
-}
-
-/// Everything physical, by position, so a different slot for the same cell doesn't matter.
-fn fingerprint(w: &World) -> (u32, u64) {
-    let occ = w.read_u32s("occ");
-    let cells = w.read_cells();
-    let sketch = w.read_u32s("sketch");
-    let fa = w.read_vec4s("fa");
-    let mut h = 0xcbf29ce484222325u64;
-    let mut mix = |v: u32| {
-        h = (h ^ v as u64).wrapping_mul(0x100000001b3);
-    };
-    for (p, o) in occ.iter().enumerate() {
-        mix(fa[p][0].to_bits());
-        mix(fa[p][1].to_bits());
-        if *o != 0 && *o != ROCK {
-            let s = *o as usize - 1;
-            mix(p as u32);
-            mix(cells[s][0]);
-            mix(cells[s][1]);
-            mix(sketch[s * 4]);
-            mix(sketch[s * 4 + 3]);
-        }
-    }
-    (w.alive(), h)
+    assert_grid_and_cells_agree(&[]);
 }
 
 #[test]
@@ -187,134 +32,6 @@ fn same_seed_same_world() {
 }
 
 // ---- One-tick rules against plain Rust ----
-
-fn blocks(cfg_hidden: u32) -> usize {
-    (cfg_hidden * (IN_BLOCKS + cfg_hidden + OUT_ROWS)) as usize
-}
-
-/// A genome whose outputs are fixed: only the bias input drives hidden unit 0, and every
-/// output reads only that unit. Returns the genome. `want` lists output values as byte weights.
-fn fixed_genome(hr: u32, want: [i8; 24]) -> Vec<u8> {
-    let n = blocks(hr);
-    let mut g = vec![0u8; n * 16];
-    // Input block 1 (i1 = random, bias, crowd, x0), row 0, word 0 (unit 0), byte 1 (bias).
-    let block = 1;
-    g[block * 16 + 1] = 127u8;
-    let ho_base = (hr * IN_BLOCKS + hr * hr) as usize;
-    for o in 0..24usize {
-        let row = o / 4;
-        let word = o % 4;
-        // Output row, hidden column 0, word for this output, byte for unit 0.
-        let at = (ho_base + row * hr as usize) * 16 + word * 4;
-        g[at] = want[o] as u8;
-    }
-    g
-}
-
-fn squash(x: f32) -> f32 {
-    let c = x.clamp(-3.0, 3.0);
-    c * (27.0 + c * c) / (27.0 + 9.0 * c * c)
-}
-
-/// What the fixed genome computes, using the same weights as the shader.
-fn outputs(want: [i8; 24]) -> [f32; 24] {
-    let w = |b: i8| (b as f32 / 127.0).max(-1.0) * 2.0;
-    let h = squash(w(127));
-    std::array::from_fn(|k| w(want[k]) * h)
-}
-
-struct Plain {
-    e: f32,
-    womb: f32,
-    ate_ground: f32,
-    ate_meat: f32,
-    work: [f32; 12],
-    a: [f32; 12],
-}
-
-/// The spending rule as plain arithmetic.
-fn spend(w: &World, out: [f32; 24], e0: f32, womb0: f32, ground: f32, meat: f32) -> Plain {
-    let c = &w.cfg;
-    let top = out[..12].iter().cloned().fold(f32::MIN, f32::max);
-    let on: [bool; 12] = [
-        true,
-        true,
-        true,
-        true,
-        true,
-        c.b("pheromones_on"),
-        c.b("heat_on"),
-        c.b("bite_on"),
-        c.b("give_on"),
-        c.b("enzyme_on"),
-        c.b("x0_on"),
-        c.b("x1_on"),
-    ];
-    let mut s = [0.0f32; 12];
-    for k in 0..12 {
-        s[k] = if on[k] {
-            (out[k] - top).clamp(-20.0, 0.0).exp()
-        } else {
-            0.0
-        };
-    }
-    let z: f32 = s.iter().sum();
-    s.iter_mut().for_each(|v| *v /= z);
-    let rest = s[0];
-    let mut e = e0;
-    let upkeep = (c.f("upkeep") + c.f("upkeep_e") * e) * (1.0 - c.f("rest_saving") * rest);
-    e -= upkeep.min(e);
-    let want = c.f("spend") * (1.0 - rest);
-    let scale = if want > e { e / want } else { 1.0 };
-    let a: [f32; 12] = std::array::from_fn(|k| s[k] * c.f("spend") * scale);
-    let commit = c.f("commitment");
-    let work: [f32; 12] = std::array::from_fn(|k| a[k] * a[k] / (a[k] + commit));
-    let ate_ground = ground * (work[2] * c.f("ground_rate")).min(1.0);
-    let ate_meat = meat * (work[3] * c.f("meat_rate")).min(1.0);
-    let spent = want * scale;
-    let grow = if womb0 < c.f("womb") { a[4] } else { 0.0 };
-    e += ate_ground + ate_meat * c.f("meat_yield") - spent + (a[4] - grow);
-    Plain {
-        e,
-        womb: womb0 + grow,
-        ate_ground,
-        ate_meat,
-        work,
-        a,
-    }
-}
-
-fn close(a: f32, b: f32, what: &str) {
-    assert!((a - b).abs() < 2e-4, "{what}: gpu {a}, plain {b}");
-}
-
-fn budget(pairs: &[(usize, i8)]) -> [i8; 24] {
-    // Everything low by default, with direction, voice and willingness at zero or below.
-    let mut v = [0i8; 24];
-    for k in 0..12 {
-        v[k] = -60;
-    }
-    v[17] = -60; // mate off
-    v[20] = -60;
-    v[21] = -60;
-    for (k, b) in pairs {
-        v[*k] = *b;
-    }
-    v
-}
-
-const REST: usize = 0;
-const GROUND: usize = 2;
-const MEAT: usize = 3;
-const GROW: usize = 4;
-const EMIT: usize = 5;
-const HEAT: usize = 6;
-const BITE: usize = 7;
-const GIVE: usize = 8;
-const ENZYME: usize = 9;
-const DIR_X: usize = 12;
-const MATE: usize = 20;
-const SHARE: usize = 21;
 
 #[test]
 fn eating_matches_plain_rule() {
@@ -555,7 +272,7 @@ fn a_child_mixes_whole_units_from_two_parents() {
     let bytes = womb.to_bits().to_le_bytes();
     w.gpu
         .queue
-        .write_buffer(&w.buffers["cell"], a as u64 * 64 + 4, &bytes);
+        .write_buffer(&w.buffers["cell"], a as u64 * CELL_BYTES + 4, &bytes);
     w.gpu.queue.submit([]);
     w.gpu.wait();
     w.step();
@@ -696,16 +413,16 @@ fn a_new_cell_starts_with_blank_measurements() {
     let g = fixed_genome(2, want);
     let womb = w.cfg.f("womb");
     // Slot 1 will go to the child. Dirty it as a dead cell would have left it.
-    let dirty = [9.0f32; 28];
+    let dirty = [9.0f32; STAT_BYTES as usize / 4];
     w.gpu
         .queue
-        .write_buffer(&w.buffers["stat"], 112, bytemuck::cast_slice(&dirty));
+        .write_buffer(&w.buffers["stat"], STAT_BYTES, bytemuck::cast_slice(&dirty));
     w.gpu.queue.submit([]);
     w.gpu.wait();
     w.plant(20, 20, 8.0, womb + 0.5, 0, &g);
     w.step();
     w.flush();
-    let kid = w.read_ranges("stat", &[(112, 112)]);
+    let kid = w.read_ranges("stat", &[(STAT_BYTES, STAT_BYTES)]);
     assert!(
         bytemuck::cast_slice::<u8, f32>(&kid)
             .iter()
