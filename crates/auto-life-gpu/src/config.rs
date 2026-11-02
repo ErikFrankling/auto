@@ -245,7 +245,7 @@ impl Config {
         ];
         if RUNNING.iter().any(|f| used_in(f)) {
             Scope::Live
-        } else if used_in("terrain.wgsl") {
+        } else if used_in("terrain.wgsl") || used_in("noise.wgsl") {
             Scope::NewWorld
         } else {
             Scope::Unused
@@ -429,47 +429,65 @@ impl Config {
         read_source(&self.shaders, file)
     }
 
-    /// The think step, spelled out with no arrays, because arrays in a function
-    /// go to scratch memory and cost about ten times as much.
+    /// The think step for this world. See [`brain_wgsl_for`].
     pub fn brain_wgsl(&self) -> (String, String) {
-        let hr = self.hidden_rows;
-        let mut s = String::from("let base = s * BLOCKS;\n    let ms = s * HR;\n");
-        for r in 0..hr {
-            s += &format!("    let m{r} = mem[ms + {r}u] * MEMORY_ON_F;\n");
-        }
-        for r in 0..hr {
-            s += &format!("    let h{r} = squash(");
-            for k in (0..IN_BLOCKS).filter(|k| self.input_live(*k)) {
-                s += &format!("bt(base + {}u, i{k}) + ", r * IN_BLOCKS + k);
-            }
-            let terms: Vec<String> = (0..hr)
-                .map(|j| format!("bt(base + HH_BASE + {}u, m{j})", r * hr + j))
-                .collect();
-            s += &terms.join(" + ");
-            s += ");\n";
-        }
-        for r in 0..hr {
-            s += &format!("    mem[ms + {r}u] = h{r};\n");
-        }
-        for o in 0..OUT_ROWS {
-            if !self.output_live(o) {
-                s += &format!("    let o{o} = vec4f(0.0);\n");
-                continue;
-            }
-            let terms: Vec<String> = (0..hr)
-                .map(|j| format!("bt(base + HO_BASE + {}u, h{j})", o * hr + j))
-                .collect();
-            s += &format!("    let o{o} = {};\n", terms.join(" + "));
-        }
-        let mut copy = String::new();
-        for r in 0..hr {
-            copy += &format!("mem[child * HR + {r}u] = h{r};\n                ");
-        }
-        (s, copy)
+        brain_wgsl_for(
+            self.hidden_rows,
+            IN_BLOCKS,
+            OUT_ROWS,
+            |k| self.input_live(k),
+            |o| self.output_live(o),
+        )
     }
 }
 
-fn has_word(text: &str, word: &str) -> bool {
+/// The think step, spelled out with no arrays, because arrays in a function go to scratch
+/// memory and cost about ten times as much. Returns the step and the lines that copy memory
+/// to a child. Both engines use it, each with its own numbers of inputs and outputs.
+pub fn brain_wgsl_for(
+    hr: u32,
+    in_blocks: u32,
+    out_rows: u32,
+    input_live: impl Fn(u32) -> bool,
+    output_live: impl Fn(u32) -> bool,
+) -> (String, String) {
+    let mut s = String::from("let base = s * BLOCKS;\n    let ms = s * HR;\n");
+    for r in 0..hr {
+        s += &format!("    let m{r} = mem[ms + {r}u] * MEMORY_ON_F;\n");
+    }
+    for r in 0..hr {
+        s += &format!("    let h{r} = squash(");
+        for k in (0..in_blocks).filter(|k| input_live(*k)) {
+            s += &format!("bt(base + {}u, i{k}) + ", r * in_blocks + k);
+        }
+        let terms: Vec<String> = (0..hr)
+            .map(|j| format!("bt(base + HH_BASE + {}u, m{j})", r * hr + j))
+            .collect();
+        s += &terms.join(" + ");
+        s += ");\n";
+    }
+    for r in 0..hr {
+        s += &format!("    mem[ms + {r}u] = h{r};\n");
+    }
+    for o in 0..out_rows {
+        if !output_live(o) {
+            s += &format!("    let o{o} = vec4f(0.0);\n");
+            continue;
+        }
+        let terms: Vec<String> = (0..hr)
+            .map(|j| format!("bt(base + HO_BASE + {}u, h{j})", o * hr + j))
+            .collect();
+        s += &format!("    let o{o} = {};\n", terms.join(" + "));
+    }
+    let mut copy = String::new();
+    for r in 0..hr {
+        copy += &format!("mem[child * HR + {r}u] = h{r};\n                ");
+    }
+    (s, copy)
+}
+
+/// Whether a word appears in text as a whole name.
+pub fn has_word(text: &str, word: &str) -> bool {
     let is_name = |c: char| c.is_ascii_alphanumeric() || c == '_';
     text.match_indices(word).any(|(at, _)| {
         !text[..at].chars().next_back().is_some_and(is_name)
@@ -515,6 +533,7 @@ fn read_source(dir: &Option<PathBuf>, file: &str) -> Result<String, String> {
         "rain.wgsl" => include_str!("../shaders/rain.wgsl"),
         "sweep.wgsl" => include_str!("../shaders/sweep.wgsl"),
         "terrain.wgsl" => include_str!("../shaders/terrain.wgsl"),
+        "noise.wgsl" => include_str!("../shaders/noise.wgsl"),
         "tick.wgsl" => include_str!("../shaders/tick.wgsl"),
         "view.wgsl" => include_str!("../shaders/view.wgsl"),
         other => return Err(format!("no shader {other}")),

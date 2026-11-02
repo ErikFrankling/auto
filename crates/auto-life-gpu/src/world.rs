@@ -1350,6 +1350,9 @@ fn build_pipe_source(
             .replace("//@BRAIN", &brain)
             .replace("//@MEMCOPY", &copy);
     }
+    if body.contains("//@NOISE") {
+        body = body.replace("//@NOISE", &cfg.source("noise.wgsl")?);
+    }
     src += &body;
     let label = format!("{file}:{entry}");
     let module = gpu.shader(&label, &src);

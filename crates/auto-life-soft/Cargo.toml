@@ -1,0 +1,22 @@
+[package]
+name = "auto-life-soft"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "soft"
+path = "src/main.rs"
+
+[[bin]]
+name = "soft-analyse"
+path = "src/bin/soft-analyse.rs"
+
+[dependencies]
+auto-core = { path = "../auto-core" }
+auto-life-gpu = { path = "../auto-life-gpu" }
+wgpu.workspace = true
+bytemuck.workspace = true
+pollster.workspace = true
+clap.workspace = true
+serde_json.workspace = true

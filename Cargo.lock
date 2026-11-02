@@ -274,6 +274,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "auto-life-soft"
+version = "0.1.0"
+dependencies = [
+ "auto-core",
+ "auto-life-gpu",
+ "bytemuck",
+ "clap",
+ "pollster",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
 name = "auto-vk"
 version = "0.1.0"
 dependencies = [
