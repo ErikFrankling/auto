@@ -370,6 +370,7 @@ fn read_source(dir: &Option<PathBuf>, file: &str) -> Result<String, String> {
         "genes.wgsl" => include_str!("../shaders/genes.wgsl"),
         "fields.wgsl" => include_str!("../shaders/fields.wgsl"),
         "census.wgsl" => include_str!("../shaders/census.wgsl"),
+        "view.wgsl" => include_str!("../shaders/view.wgsl"),
         other => return Err(format!("no shader {other}")),
     }
     .to_string())

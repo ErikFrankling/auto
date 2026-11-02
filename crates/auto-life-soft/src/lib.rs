@@ -4,6 +4,7 @@
 
 pub mod config;
 pub mod dump;
+pub mod view;
 pub mod measure;
 pub mod world;
 

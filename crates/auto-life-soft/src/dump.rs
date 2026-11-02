@@ -289,3 +289,28 @@ pub fn write_png(cells: &[DumpCell], size: u32, path: &str) -> Result<(), String
     }
     Ok(())
 }
+
+/// Reads short runs of slots spread across the world, for about this many living cells. Far
+/// less to read than every cell, and enough for a palette.
+pub fn sample(world: &mut World, want: usize) -> Vec<DumpCell> {
+    world.flush();
+    let to_sq = 1.0 / (1u64 << (32 - world.cfg.size.trailing_zeros())) as f32;
+    let slots = world.cfg.slots as u64;
+    let run = 64u64.min(slots);
+    let runs = (want as u64 * 2 / run).clamp(1, slots / run);
+    let gap = slots / runs;
+    let mut out = Vec::new();
+    for k in 0..runs {
+        let s = k * gap;
+        let of = |stride: u64| [(s * stride, run * stride)];
+        let cells: Vec<Cell> = bytemuck::pod_collect_to_vec(&world.read_ranges("cell", &of(CELL_BYTES)));
+        let plans: Vec<Plan> = bytemuck::pod_collect_to_vec(&world.read_ranges("plan", &of(PLAN_BYTES)));
+        let sketches: Vec<[u32; 4]> = bytemuck::pod_collect_to_vec(&world.read_ranges("sketch", &of(SKETCH_BYTES)));
+        for i in 0..run as usize {
+            if cells[i].flags & F_ALIVE != 0 {
+                out.push(from_records(&cells[i], &plans[i], sketches[i], to_sq));
+            }
+        }
+    }
+    out
+}

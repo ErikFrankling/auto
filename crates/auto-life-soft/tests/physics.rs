@@ -981,3 +981,43 @@ fn a_saved_world_can_seed_a_bigger_one() {
     assert!(b.alive() > 0);
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn the_view_draws_a_cell_where_it_is() {
+    use auto_life_soft::dump::{self, Palette};
+    use auto_life_soft::view::{Canvas, ViewParams, ViewPipe, layout};
+    let mut w = still_world(32, &[]);
+    let g = genome(&[(REST, 127)]);
+    w.plant(10.0, 10.0, 20.0, 0.0, 0.0, &g);
+    w.plant(20.0, 20.0, 4.0, 0.0, 0.0, &g);
+    w.step();
+    w.flush();
+    let group = layout(&w.gpu.device);
+    let pipe = ViewPipe::new(&w, &group).unwrap();
+    let canvas = Canvas::new(&w.gpu.device, &group, 128, 128);
+    let cells = dump::living(&mut w);
+    let mut p = ViewParams::new(&Palette::fit(&cells), [1.0; 8]);
+    // A quarter of a square per pixel, so the first cell is at (40, 40) with the view at 0.
+    p.scale = 0.25;
+    p.origin = [0.0, 0.0];
+    p.center = [16.0, 16.0];
+    p.cell_mode = 1;
+    p.e_top = 20.0;
+    canvas.draw(&w.gpu.device, &w.gpu.queue, &pipe, w.flip(), p);
+    w.gpu.wait();
+    let rgba = canvas.read(&w.gpu);
+    let at = |x: usize, y: usize| -> [u8; 3] {
+        let i = (y * 128 + x) * 4;
+        [rgba[i], rgba[i + 1], rgba[i + 2]]
+    };
+    assert_ne!(at(40, 40), [0, 0, 0], "inside the first cell");
+    assert_eq!(at(60, 60), [0, 0, 0], "open ground");
+    assert_ne!(at(80, 80), [0, 0, 0], "inside the second cell");
+    // Energy shows: the full cell is the top of the scale, and the thin one isn't.
+    assert_ne!(at(40, 40), at(80, 80));
+    // Darker towards its edge.
+    let mid: u32 = at(40, 40).iter().map(|v| *v as u32).sum();
+    let r_px = (cells[0].r * 4.0) as usize;
+    let rim: u32 = at(40 + r_px, 40).iter().map(|v| *v as u32).sum();
+    assert!(rim < mid, "rim {rim}, middle {mid}");
+}

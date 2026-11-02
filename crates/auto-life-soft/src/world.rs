@@ -1568,8 +1568,24 @@ fn build_pipe(
     entry: &str,
     binds: &[Bind],
 ) -> Result<Pipe, String> {
-    let device = &gpu.device;
     let body = cfg.source(file)?;
+    build_pipe_source(gpu, cfg, buffers, frames, file, &body, entry, binds, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_pipe_source(
+    gpu: &Gpu,
+    cfg: &Config,
+    buffers: &HashMap<&'static str, wgpu::Buffer>,
+    frames: &wgpu::Buffer,
+    file: &str,
+    body: &str,
+    entry: &str,
+    binds: &[Bind],
+    group1: Option<&wgpu::BindGroupLayout>,
+) -> Result<Pipe, String> {
+    let device = &gpu.device;
+    let body = body.to_string();
     // A world with two genome buffers binds the second wherever the first is bound.
     let mut expanded: Vec<Bind> = binds.to_vec();
     let genome_access = binds.iter().find(|(n, _, _)| *n == "genome").map(|b| b.2);
@@ -1630,9 +1646,13 @@ fn build_pipe(
         label: Some(&label),
         entries: &entries,
     });
+    let mut layouts = vec![Some(&layout)];
+    if let Some(extra) = group1 {
+        layouts.push(Some(extra));
+    }
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(&label),
-        bind_group_layouts: &[Some(&layout)],
+        bind_group_layouts: &layouts,
         immediate_size: 0,
     });
     let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -1691,4 +1711,49 @@ pub fn read_saved_cells(path: &str) -> Result<crate::dump::Dump, String> {
         physics: head["physics"].clone(),
         cells,
     })
+}
+
+impl World {
+    /// A pipeline over the world's buffers, for something that only looks at them. Returns a bind
+    /// group for each way round the field buffers can be.
+    pub fn extra_pipe(
+        &self,
+        label: &str,
+        source: &str,
+        entry: &str,
+        binds: &[(&'static str, &'static str, Access)],
+        group1: Option<&wgpu::BindGroupLayout>,
+    ) -> Result<(wgpu::ComputePipeline, [wgpu::BindGroup; 2]), String> {
+        let p = build_pipe_source(&self.gpu, &self.cfg, &self.buffers, &self.frames, label, source, entry, binds, group1)?;
+        Ok((p.pipeline, p.groups))
+    }
+
+    /// Which of the two field buffers is current. Changes with every tick queued.
+    pub fn flip(&self) -> usize {
+        self.flip
+    }
+
+    /// A field's top of range, from a sample of squares: near the highest, so dense places still
+    /// show detail, but not thrown off by one hot square. Food, meat, heat, enzyme, then scents.
+    pub fn field_tops(&self) -> [f32; 8] {
+        let size = self.cfg.size as u64;
+        let step = (size / 32).max(1);
+        let ranges: Vec<(u64, u64)> = (0..size.min(32)).map(|k| (k * step * size * 16, size * 16)).collect();
+        let (fa, fb) = if self.flip == 0 { ("fa_a", "fb_a") } else { ("fa_b", "fb_b") };
+        let mut out = [1e-3f32; 8];
+        for (layer, name) in [fa, fb].iter().enumerate() {
+            let bytes = self.read_ranges(name, &ranges);
+            let values: &[[i32; 4]] = bytemuck::cast_slice(&bytes);
+            for k in 0..4 {
+                let mut v: Vec<i32> = values.iter().map(|s| s[k]).filter(|x| *x > 0).collect();
+                if v.is_empty() {
+                    continue;
+                }
+                v.sort_unstable();
+                let top = v[((v.len() - 1) as f32 * 0.995) as usize];
+                out[layer * 4 + k] = (top as f32 / E_ONE).max(1e-3);
+            }
+        }
+        out
+    }
 }
