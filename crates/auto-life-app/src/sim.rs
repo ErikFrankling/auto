@@ -259,7 +259,9 @@ impl Sim {
                     }
                     Cmd::Load(path) => {
                         // A bad file shouldn't cost the world that's running.
-                        if let Err(e) = Config::from_save(&path, self.shaders.clone()) {
+                        let limit = buffer_limit(&self.gpu);
+                        let saved = Config::from_save(&path, self.shaders.clone());
+                        if let Err(e) = saved.and_then(|c| c.check_buffers(limit)) {
                             self.status.lock().unwrap().message = Some((true, e));
                             continue;
                         }
@@ -294,7 +296,10 @@ impl Sim {
                     }
                     Cmd::New(spec) => {
                         // Bad seed worlds shouldn't cost the world that's running.
-                        if let Err(e) = check_seeds(&spec, &self.shaders) {
+                        let fits = self
+                            .world_config(&spec)
+                            .and_then(|c| c.check_buffers(buffer_limit(&self.gpu)));
+                        if let Err(e) = fits.and_then(|()| check_seeds(&spec, &self.shaders)) {
                             self.status.lock().unwrap().message = Some((true, e));
                             continue;
                         }
@@ -309,6 +314,15 @@ impl Sim {
                         debug(&format!("built it after {:?}", began.elapsed()));
                         self.adopt(result, &mut live, None);
                         debug(&format!("ready after {:?}", began.elapsed()));
+                        if let Some(l) = &live
+                            && !spec.seed_from.is_empty()
+                            && l.world.alive() >= l.world.cfg.slots
+                        {
+                            self.status.lock().unwrap().message = Some((
+                                false,
+                                "The seed worlds have more cells than this world has room for, so the last tiles are partly empty.".into(),
+                            ));
+                        }
                         running = live.is_some();
                         last_fields = ago(LONG_AGO);
                         (rate_tick, rate_at, rate_gpu) = fresh_rate(&live);
@@ -482,7 +496,7 @@ impl Sim {
         self.gpu.wait();
     }
 
-    fn make_world(&self, spec: &NewWorld) -> Result<World, String> {
+    fn world_config(&self, spec: &NewWorld) -> Result<Config, String> {
         let mut cfg = Config::new(spec.size, spec.seed, self.shaders.clone())?;
         for (k, v) in &spec.physics {
             cfg.physics.insert(k.clone(), v.clone());
@@ -490,6 +504,11 @@ impl Sim {
         cfg.hidden_rows = spec.hidden_rows;
         cfg.shard_slots = cfg.max_shard_slots();
         cfg.slots = spec.slots.max(1024);
+        Ok(cfg)
+    }
+
+    fn make_world(&self, spec: &NewWorld) -> Result<World, String> {
+        let cfg = self.world_config(spec)?;
         guarded(&self.gpu, || {
             let mut w = World::with_gpu(
                 self.gpu.clone(),
@@ -807,4 +826,12 @@ fn check_seeds(spec: &NewWorld, shaders: &Option<PathBuf>) -> Result<(), String>
         }
     }
     Ok(())
+}
+
+/// The largest single buffer this device can use.
+pub fn buffer_limit(gpu: &Gpu) -> u64 {
+    let limits = gpu.device.limits();
+    limits
+        .max_storage_buffer_binding_size
+        .min(limits.max_buffer_size)
 }

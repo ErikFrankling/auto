@@ -80,6 +80,7 @@ fn first_world(args: &Args, gpu: &Gpu) -> Result<Cmd, String> {
             let path = format!("{SAVES_DIR}/{name}");
             if let Ok(cfg) = Config::from_save(&path, args.shaders.clone())
                 && fits(cfg.vram_bytes())
+                && cfg.check_buffers(sim::buffer_limit(gpu)).is_ok()
             {
                 return Ok(Cmd::Load(path));
             }
@@ -114,7 +115,8 @@ impl ApplicationHandler for App {
                     Window::default_attributes()
                         .with_title("Life")
                         .with_name("life-app", "life-app")
-                        .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 960.0)),
+                        .with_inner_size(winit::dpi::LogicalSize::new(1600.0, 960.0))
+                        .with_min_inner_size(winit::dpi::LogicalSize::new(760.0, 480.0)),
                 )
                 .expect("window"),
         );

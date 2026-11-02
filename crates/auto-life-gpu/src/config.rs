@@ -227,6 +227,35 @@ impl Config {
         self.slots > self.shard_slots
     }
 
+    /// Why this world can't be made on a device with this limit per buffer, if it can't.
+    pub fn check_buffers(&self, limit: u64) -> Result<(), String> {
+        let squares = self.size as u64 * self.size as u64;
+        let slots = self.slots as u64;
+        let genome = self.blocks() as u64 * 16;
+        let near = slots.min(self.shard_slots as u64);
+        let largest = (squares * 16)
+            .max(slots * STAT_BYTES)
+            .max(slots * CELL_BYTES)
+            .max(slots * self.hidden_rows as u64 * 16)
+            .max(near * genome)
+            .max((slots - near) * genome);
+        if largest > limit {
+            return Err(format!(
+                "This GPU allows {:.2} GB per buffer, and this world needs {:.2} GB",
+                limit as f64 / 1e9,
+                largest as f64 / 1e9
+            ));
+        }
+        Ok(())
+    }
+
+    /// The most cells whose genomes fit a device with this limit per buffer.
+    pub fn slots_within(&self, limit: u64) -> u32 {
+        let genome = self.blocks() as u64 * 16;
+        let one_buffer = limit.min(2 << 30) / genome;
+        (one_buffer * if limit >= 2 << 30 { 2 } else { 1 }).min(u32::MAX as u64) as u32
+    }
+
     pub fn vram_bytes(&self) -> u64 {
         let squares = self.size as u64 * self.size as u64;
         let slot =

@@ -288,3 +288,20 @@ fn colour_ranges_ignore_the_extremes() {
     assert!(explore::fit_range(vec![1.0, 2.0]).is_none());
     assert_eq!(explore::fit_top(vec![0.0, 0.0]), 1e-3);
 }
+
+#[test]
+fn a_world_too_big_for_the_device_is_known_beforehand() {
+    let mut cfg = Config::new(1024, 1, None).unwrap();
+    let genome = cfg.blocks() as u64 * 16;
+    // Half the squares can hold cells, so genomes are the biggest buffer here.
+    cfg.slots = 1 << 19;
+    let need = (1u64 << 19) * genome;
+    assert!(cfg.check_buffers(need).is_ok());
+    assert!(cfg.check_buffers(need - 1).is_err());
+
+    // The cell limit that's offered always fits.
+    let limit = 128 << 20;
+    cfg.slots = cfg.slots_within(limit);
+    assert!(cfg.check_buffers(limit).is_ok());
+    assert!(cfg.check_buffers(cfg.slots as u64 * genome - 1).is_err());
+}

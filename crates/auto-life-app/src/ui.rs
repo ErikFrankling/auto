@@ -161,9 +161,17 @@ pub struct Ui {
     path_text: String,
     overwrite_ok: bool,
     help: bool,
+    show_panels: bool,
     longest_frame: f32,
     good_news_since: Option<Instant>,
+    pan: Option<Pan>,
     frame_clock: Instant,
+}
+
+/// A drag on the world in progress.
+struct Pan {
+    last: egui::Pos2,
+    moved: f32,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -243,8 +251,10 @@ impl Ui {
             path_text: String::new(),
             overwrite_ok: false,
             help: false,
+            show_panels: true,
             longest_frame: 0.0,
             good_news_since: None,
+            pan: None,
             frame_clock: Instant::now(),
         }
     }
@@ -338,16 +348,22 @@ impl Ui {
         egui::Panel::top("controls")
             .frame(Frame::side_top_panel(root.style()).inner_margin(Margin::symmetric(8, 5)))
             .show(root, |ui| self.top_bar(ui));
-        egui::Panel::left("views")
-            .resizable(true)
-            .default_size(236.0)
-            .min_size(190.0)
-            .show(root, |ui| self.views_panel(ui));
-        egui::Panel::right("side")
-            .resizable(true)
-            .default_size(372.0)
-            .min_size(280.0)
-            .show(root, |ui| self.side_panel(ui));
+        // Side panels take a share of the window, so a small window still shows the world.
+        let window = root.ctx().content_rect().width();
+        if self.show_panels {
+            egui::Panel::left("views")
+                .resizable(true)
+                .default_size((window * 0.18).clamp(170.0, 236.0))
+                .min_size(150.0)
+                .max_size((window * 0.3).max(170.0))
+                .show(root, |ui| self.views_panel(ui));
+            egui::Panel::right("side")
+                .resizable(true)
+                .default_size((window * 0.26).clamp(240.0, 372.0))
+                .min_size(220.0)
+                .max_size((window * 0.45).max(240.0))
+                .show(root, |ui| self.side_panel(ui));
+        }
         egui::CentralPanel::default()
             .frame(Frame::NONE)
             .show(root, |ui| self.world_view(ui, renderer));
@@ -431,6 +447,7 @@ impl Ui {
                 }
                 Key::F => self.fit(),
                 Key::H => self.show_cells = !self.show_cells,
+                Key::P => self.show_panels = !self.show_panels,
                 Key::Plus | Key::Equals => {
                     if !self.full_speed {
                         self.set_speed(self.rate >= 25000.0, self.rate * 2.0);
@@ -458,16 +475,23 @@ impl Ui {
     }
 
     fn top_bar(&mut self, ui: &mut Ui2) {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            self.top_right(ui);
-            ui.with_layout(
-                Layout::left_to_right(Align::Center).with_main_wrap(true),
-                |ui| self.top_left(ui),
-            );
+        // Wide enough for everything on one row, or the numbers go on a row of their own.
+        let one_row = ui.available_width() >= 1250.0;
+        ui.horizontal(|ui| {
+            self.top_controls(ui);
+            if one_row {
+                self.top_stats(ui);
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                self.top_right(ui)
+            });
         });
+        if !one_row {
+            ui.horizontal(|ui| self.top_stats(ui));
+        }
     }
 
-    fn top_left(&mut self, ui: &mut Ui2) {
+    fn top_controls(&mut self, ui: &mut Ui2) {
         {
             let label = if self.running { "Pause" } else { "Play" };
             if ui
@@ -519,6 +543,11 @@ impl Ui {
                 let full = !self.full_speed;
                 self.set_speed(full, self.rate);
             }
+        }
+    }
+
+    fn top_stats(&mut self, ui: &mut Ui2) {
+        {
             ui.separator();
             if self.st.size == 0 {
                 return;
@@ -537,6 +566,13 @@ impl Ui {
     }
 
     fn top_right(&mut self, ui: &mut Ui2) {
+        if ui
+            .selectable_label(self.show_panels, "Panels")
+            .on_hover_text("Hide or show the side panels. Key: P")
+            .clicked()
+        {
+            self.show_panels = !self.show_panels;
+        }
         if ui.button("Help").clicked() {
             self.help = !self.help;
         }
@@ -1078,11 +1114,43 @@ impl Ui {
 
     fn camera(&mut self, ui: &mut Ui2, response: &egui::Response, rect: Rect, ppp: f64, fit: f64) {
         let size = self.st.size as f64;
-        let delta = response.drag_delta();
-        if delta != Vec2::ZERO {
-            self.cx -= delta.x as f64 * ppp * self.scale;
-            self.cy -= delta.y as f64 * ppp * self.scale;
-            self.follow = false;
+        // Read from the raw pointer events, so a drag counts however few frames it spans. On a
+        // slow frame a whole quick drag can arrive at once, which egui's own drag tracking ignores.
+        let events = ui.ctx().input(|i| i.events.clone());
+        for event in &events {
+            match event {
+                Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    ..
+                } => {
+                    let on_world = rect.contains(*pos)
+                        && ui
+                            .ctx()
+                            .layer_id_at(*pos)
+                            .is_none_or(|layer| layer.order == egui::Order::Background);
+                    self.pan = (*pressed && on_world).then_some(Pan {
+                        last: *pos,
+                        moved: 0.0,
+                    });
+                }
+                Event::PointerMoved(pos) => {
+                    if let Some(pan) = &mut self.pan {
+                        let step = *pos - pan.last;
+                        pan.last = *pos;
+                        pan.moved += step.length();
+                        // A click wobbles a little. That shouldn't move the view.
+                        if pan.moved > 3.0 {
+                            self.cx -= step.x as f64 * ppp * self.scale;
+                            self.cy -= step.y as f64 * ppp * self.scale;
+                            self.follow = false;
+                        }
+                    }
+                }
+                Event::PointerGone => self.pan = None,
+                _ => {}
+            }
         }
         if response.hovered() {
             let (scroll, pinch, cursor) = ui.ctx().input(|i| {
@@ -1301,7 +1369,8 @@ impl Ui {
                 };
                 cfg.hidden_rows = self.new.hidden_rows;
                 cfg.shard_slots = cfg.max_shard_slots();
-                let most = cfg.max_shard_slots() as u64 * 2;
+                let limit = crate::sim::buffer_limit(&self.gpu);
+                let most = (cfg.max_shard_slots() as u64 * 2).min(cfg.slots_within(limit) as u64);
                 let most = most.min(cfg.size as u64 * cfg.size as u64) as u32;
                 if self.new.slots == 0 {
                     self.new.slots = cfg.default_slots().min(most);
@@ -1379,13 +1448,20 @@ impl Ui {
                         ui.label(format!("Needs {:.2} GB of memory.", gb(need)));
                     }
                 }
+                let too_big = cfg.check_buffers(limit).err();
+                if let Some(why) = &too_big {
+                    ui.colored_label(
+                        Color32::from_rgb(255, 150, 130),
+                        format!("{why}, so it can't be made."),
+                    );
+                }
                 if self.new.size >= 4096 {
                     ui.small("Worlds this big run a few ticks per second at best.");
                 }
                 ui.add_space(4.0);
                 if ui
                     .add_enabled(
-                        fits || self.new.anyway,
+                        too_big.is_none() && (fits || self.new.anyway),
                         egui::Button::new(RichText::new("Start this world").strong()),
                     )
                     .clicked()
@@ -1464,7 +1540,15 @@ impl Ui {
                                 let need = cfg.vram_bytes();
                                 let room = self.room_for_world();
                                 let fits = room.is_none_or(|r| need <= r);
-                                can = fits;
+                                let too_big =
+                                    cfg.check_buffers(crate::sim::buffer_limit(&self.gpu)).err();
+                                can = fits && too_big.is_none();
+                                if let Some(why) = too_big {
+                                    ui.colored_label(
+                                        Color32::from_rgb(255, 150, 130),
+                                        format!("{why}, so it can't be opened."),
+                                    );
+                                }
                                 if fits {
                                     ui.label(format!(
                                         "{0} x {0}, needs {1:.2} GB of VRAM. This replaces the world that's running.",
@@ -1548,6 +1632,7 @@ impl Ui {
                         ("Shift + 1 to 0", "Quick fields under the cells"),
                         ("Left and right", "Every field under the cells"),
                         ("H", "Hide or show the cells"),
+                        ("P", "Hide or show the side panels"),
                     ] {
                         ui.label(a);
                         ui.label(b);
