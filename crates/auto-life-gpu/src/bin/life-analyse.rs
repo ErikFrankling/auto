@@ -1411,7 +1411,7 @@ fn genome_colours(w: &Save) -> HashMap<usize, [u8; 3]> {
 }
 
 /// A picture of one world to read by eye, as a PPM. Rock is dark in every panel.
-/// Top row: cells by genome, colours chosen for this world alone; cells by diet (red bites, green ground, blue meat and gifts);
+/// Top row: cells by genome, colours chosen for this world alone; cells by recent diet (red bites, green ground, blue meat and gifts);
 /// cells by how much they move (blue sits, yellow moves).
 /// Bottom row: sun; every step taken over the run, on a log scale; tracks on the ground if there
 /// are any, otherwise mineral if there's any, otherwise cells by energy.
@@ -1449,7 +1449,8 @@ fn map_picture(w: &Save, path: &str) {
                 colours[0] = genome[&(o as usize - 1)];
                 let t = (st[0] + st[1] + st[2] + st[3]).max(1e-6);
                 let shade = |v: f32| (40.0 + 215.0 * v.clamp(0.0, 1.0)) as u8;
-                colours[1] = [shade(st[2] / t), shade(st[0] / t), shade((st[1] + st[3]) / t)];
+                // Stretched, since a cell with a quarter of its food from biting is a real biter.
+                colours[1] = [shade(st[2] / t * 3.0), shade(st[0] / t * (1.0 - (st[2] / t * 3.0).min(0.7))), shade((st[1] + st[3]) / t * 2.0)];
                 let m = (st[19] * 2.5).clamp(0.0, 1.0);
                 colours[2] = [(255.0 * m) as u8, (230.0 * m) as u8, (255.0 * (1.0 - m)) as u8];
                 if last == 2 {

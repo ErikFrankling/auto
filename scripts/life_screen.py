@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-RUNS = Path("/tmp/lg/screen")
+RUNS = Path(os.environ.get("LIFE_SCREEN_RUNS", "/tmp/lg/screen"))
 OUT = Path(os.environ.get("LIFE_SCREEN_OUT", ROOT / "research/life-gpu/screen"))
 SPOOL = Path("/tmp/life-spool")
 BIN = os.environ.get("LIFE_BIN", "/tmp/life-batch/direct")

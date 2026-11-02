@@ -57,7 +57,8 @@ MEASURES = {
     "lasting strategies over 1%": lambda r: time_of(r).get("persistent_1pct"),
     "strategies over 3% at the end": lambda r: last(time_of(r).get("distinct_3pct")),
     "species at the end": lambda r: r.get("species"),
-    "species explain behaviour": lambda r: r.get("explain"),
+    # With one species there's nothing to explain, so it isn't a score of 0.
+    "species explain behaviour": lambda r: r.get("explain") if (r.get("species") or 0) >= 2 else None,
     "new species": lambda r: total(time_of(r).get("new_species")),
     "strategy turnover": lambda r: time_of(r).get("turnover"),
     "energy from other cells": lambda r: flow_share(r, "bite", "meat"),
@@ -195,8 +196,7 @@ def card(row, analyse, history):
     )
     b = row.get("brain") or {}
     lines.append(
-        f"brains: dims {b.get('dims')}, reactivity {b.get('reactivity')}, memory {b.get('memory')}, "
-        f"bites across strategies {b.get('bites_across')}"
+        f"brains: dims {b.get('dims')}, reactivity {b.get('reactivity')}, memory {b.get('memory')}"
     )
     if history:
         lines.append(f"events: {len(history.get('events') or [])}; colony travel {json.dumps(history.get('colony_travel'))}")
@@ -245,7 +245,7 @@ def cards(batch):
     print("extras under extras_control means cells don't pile on the same target more than on a body they could have picked.")
     print(f"group hunting {json.dumps(rows[0].get('group_hunting'))}")
     print(f"birth limit {json.dumps(rows[0].get('birth_limit'))}, follows others {rows[0].get('follows_others')}")
-    print(f"coat {json.dumps(rows[0].get('coat'))[:300]}, mineral {json.dumps(rows[0].get('mineral'))[:200]}\n")
+    print(f"coat {json.dumps(rows[0].get('coat'))}, mineral {json.dumps(rows[0].get('mineral'))}\n")
     for r in sorted(rows, key=lambda r: r["index"]):
         print(card(r, analyse.get(r["index"]), history.get(r["index"])))
         print()
