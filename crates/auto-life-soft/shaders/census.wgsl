@@ -8,26 +8,32 @@ fn wide(k: u32, x: u32) {
     if (old > 0xFFFFFFFFu - x) { atomicAdd(&tot[k * 2u + 1u], 1u); }
 }
 
-// One row of squares at a time. A row has at most 4096 squares of at most about 2^20 each.
+// One row of squares at a time, flushed every 256 squares, so a plain u32 is safe unless 256
+// squares in a row average over 256 energy.
 @compute @workgroup_size(8)
 fn squares(@builtin(global_invocation_id) id: vec3u) {
     let y = id.x + F.row0;
     if (y >= W) { return; }
-    var food = 0u;
-    var meat = 0u;
-    var heat = 0u;
-    var enzyme = 0u;
-    for (var x = 0u; x < W; x++) {
-        let v = fa0[(y << LOG_W) | x];
-        food += u32(v.x);
-        meat += u32(v.y);
-        heat += u32(v.z);
-        enzyme += u32(v.w);
+    var x = 0u;
+    loop {
+        if (x >= W) { break; }
+        var food = 0u;
+        var meat = 0u;
+        var heat = 0u;
+        var enzyme = 0u;
+        for (var k = x; k < min(x + 256u, W); k++) {
+            let v = fa0[(y << LOG_W) | k];
+            food += u32(v.x);
+            meat += u32(v.y);
+            heat += u32(v.z);
+            enzyme += u32(v.w);
+        }
+        wide(0u, food);
+        wide(1u, meat);
+        wide(2u, heat);
+        wide(3u, enzyme);
+        x += 256u;
     }
-    wide(0u, food);
-    wide(1u, meat);
-    wide(2u, heat);
-    wide(3u, enzyme);
 }
 
 // 256 slots at a time.

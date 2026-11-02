@@ -450,3 +450,68 @@ fn discs_are_drawn_round_and_wrap() {
     assert!(!lit(10, 64));
     assert!(!lit(1, 80));
 }
+
+#[test]
+fn the_touching_control_means_the_same_with_or_without_adhesion() {
+    // A row that touches but doesn't stick, that scatters at the next dump.
+    let mut a = frame(100, &[range(0, 12)]);
+    for c in &mut a.cells {
+        c.stick = 0.0;
+    }
+    a.labels = groups(&a.cells, &RULES, Link::Stuck);
+    let spread: Vec<Vec<u32>> = (0..12).map(|k| vec![k]).collect();
+    let mut b = frame(200, &spread);
+    for c in &mut b.cells {
+        c.stick = 0.0;
+    }
+    b.labels = groups(&b.cells, &RULES, Link::Stuck);
+    let s = summary(&[a, b], &RULES);
+    assert_eq!(s["bodies"]["count"], 0, "no adhesion, no bodies");
+    let hl = s["crowds_by_touching_only"]["half_life_ticks"].as_f64().unwrap();
+    assert!((hl - 50.0).abs() < 1e-6, "{hl}");
+}
+
+#[test]
+fn every_setting_is_read_by_a_shader() {
+    use auto_life_gpu::config::Scope;
+    let cfg = auto_life_soft::Config::new(64, 1, None).unwrap();
+    for key in cfg.physics.keys() {
+        assert!(cfg.scope(key) != Scope::Unused, "no shader reads {key}");
+    }
+    assert!(cfg.scope("rock") == Scope::NewWorld);
+    assert!(cfg.scope("terrain_contrast") == Scope::NewWorld);
+    assert!(cfg.scope("k_push") == Scope::Live);
+    assert!(cfg.scope("stick_on") == Scope::Live);
+}
+
+#[test]
+fn settings_that_would_divide_by_zero_are_refused() {
+    for key in ["drag", "e_size", "stick_half", "enzyme_half", "heat_scale", "r_max"] {
+        let mut cfg = auto_life_soft::Config::new(64, 1, None).unwrap();
+        cfg.set(key, "0").unwrap();
+        assert!(cfg.check(1 << 30).is_err(), "{key} of 0 was allowed");
+    }
+    let mut cfg = auto_life_soft::Config::new(64, 1, None).unwrap();
+    cfg.set("gap", "0.5").unwrap();
+    assert!(cfg.check(1 << 30).is_err(), "reach past what a bin spans");
+    let mut cfg = auto_life_soft::Config::new(64, 1, None).unwrap();
+    cfg.set("heat_flow", "0.3").unwrap();
+    assert!(cfg.check(1 << 30).is_err(), "unstable flow");
+    assert!(auto_life_soft::Config::new(64, 1, None).unwrap().check(1 << 30).is_ok());
+    assert!(auto_life_soft::Config::new(100, 1, None).is_err(), "not a power of two");
+}
+
+#[test]
+fn averages_are_means_of_what_cells_hold() {
+    let mut a = cell(0, 1.0, 1.0, 0.5);
+    let mut b = cell(1, 5.0, 5.0, 1.0);
+    a.budget[10] = 0.2;
+    b.budget[10] = 0.4;
+    a.gen_ = 3;
+    b.gen_ = 5;
+    let m = averages(&[a, b]);
+    assert!((m["stick"].as_f64().unwrap() - 0.75).abs() < 1e-9);
+    assert!((m["generation"].as_f64().unwrap() - 4.0).abs() < 1e-9);
+    let shares = &m["share_rest_thrust_eat_meat_grow_emit_heat_bite_give_enzyme_stick_push"];
+    assert!((shares[10].as_f64().unwrap() - 0.3).abs() < 1e-6);
+}

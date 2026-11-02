@@ -30,6 +30,8 @@ to be switched on: `dom.webgpu.enabled` in Firefox, or `--enable-unsafe-webgpu
 `./life` opens the artificial life program, building it first if anything changed.
 It starts on an evolved world if one is in `/tmp/lg/saves`, otherwise a new one.
 
+`./soft` opens the soft cell simulator the same way. Its cells are discs that can stick together, so bodies are possible.
+
 ## How the code is laid out
 
 | Crate | What it does |
@@ -41,6 +43,8 @@ It starts on an evolved world if one is in `/tmp/lg/saves`, otherwise a new one.
 | `auto-app` | The live viewer, shared by the window and the browser. |
 | `auto-life-gpu` | The artificial life world: one cell per square, one small brain per cell. The `life` binary runs it headless. |
 | `auto-life-app` | A window onto a life world: pan, zoom, every physics setting, every colouring, inspect any cell. Start it with `./life`. |
+| `auto-life-soft` | Soft life: discs in continuous 2D that can push, stick and share, so bodies are physically possible. The `soft` binary runs it headless, and `soft-analyse` measures bodies from its dumps. See [research/life-soft](research/life-soft/DESIGN.md). |
+| `auto-soft-app` | A window onto a soft world: pan, zoom, speed, every physics setting, cells drawn as soft polygons up close. Start it with `./soft`. |
 | `auto-web` | Browser entry points and the page. |
 | `auto-vk` | The same programs through hand-written Vulkan, to measure what wgpu costs. |
 

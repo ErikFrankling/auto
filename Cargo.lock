@@ -287,6 +287,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "auto-soft-app"
+version = "0.1.0"
+dependencies = [
+ "auto-core",
+ "auto-life-gpu",
+ "auto-life-soft",
+ "bytemuck",
+ "clap",
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "pollster",
+ "serde_json",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "auto-vk"
 version = "0.1.0"
 dependencies = [

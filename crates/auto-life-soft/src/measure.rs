@@ -191,6 +191,16 @@ impl Frame {
         let labels = groups(&cells, rules, Link::Stuck);
         Frame { tick, cells, labels }
     }
+
+    /// The same cells, grouped by touching only. The control for anything measured on bodies,
+    /// since it means the same in a world with adhesion and one without.
+    pub fn touching(&self, rules: &Rules) -> Frame {
+        Frame {
+            tick: self.tick,
+            cells: self.cells.clone(),
+            labels: groups(&self.cells, rules, Link::Touching),
+        }
+    }
 }
 
 /// A small fixed random number source, so a shuffle comes out the same each time.
@@ -622,6 +632,22 @@ pub fn position_effect(frame: &Frame, clone_gap: f32, least: usize) -> Position 
 
 // ---- A world's summary ----
 
+/// What the average cell is doing: its stick, generation, age and share of the budget per action.
+pub fn averages(cells: &[DumpCell]) -> Value {
+    let n = cells.len().max(1) as f64;
+    let mean = |f: &dyn Fn(&DumpCell) -> f64| cells.iter().map(f).sum::<f64>() / n;
+    let shares: Vec<f64> = (0..12).map(|k| mean(&|c| c.budget[k] as f64)).collect();
+    json!({
+        "stick": mean(&|c| c.stick as f64),
+        "generation": mean(&|c| c.gen_ as f64),
+        "age": mean(&|c| c.age as f64),
+        "energy": mean(&|c| c.e as f64),
+        "contacts": mean(&|c| c.contacts as f64),
+        "mutation_rate": mean(&|c| c.mu as f64),
+        "share_rest_thrust_eat_meat_grow_emit_heat_bite_give_enzyme_stick_push": shares,
+    })
+}
+
 fn opt(v: Option<f64>) -> Value {
     v.map_or(Value::Null, |x| json!(x))
 }
@@ -635,6 +661,10 @@ pub fn summary(frames: &[Frame], rules: &Rules) -> Value {
     let crowd = size_stats(&groups(&last.cells, rules, Link::Touching));
     let bodies = track(frames);
     let keep = membership(frames);
+    // The control: the same measures with groups made by touching only.
+    let crowds: Vec<Frame> = frames.iter().map(|f| f.touching(rules)).collect();
+    let keep_crowd = membership(&crowds);
+    let related_crowd = relatedness(&crowds[crowds.len() - 1], rules);
     let related = relatedness(last, rules);
     let position = position_effect(last, 0.4, 7);
     let (slope, pairs) = size_heritability(&bodies);
@@ -643,7 +673,8 @@ pub fn summary(frames: &[Frame], rules: &Rules) -> Value {
         .iter()
         .map(|f| {
             let s = size_stats(&f.labels);
-            json!({"tick": f.tick, "cells": s.cells, "bodies": s.bodies, "largest": s.largest,
+            let a = averages(&f.cells);
+            json!({"tick": f.tick, "cells": s.cells, "bodies": s.bodies, "largest": s.largest, "stick": a["stick"], "generation": a["generation"], "energy": a["energy"],
                    "in_bodies": s.in_bodies, "in_10_plus": s.in_10_plus, "mean_per_cell": s.mean_per_cell})
         })
         .collect();
@@ -665,7 +696,13 @@ pub fn summary(frames: &[Frame], rules: &Rules) -> Value {
             "largest": crowd.largest,
             "share_of_cells": crowd.in_bodies,
             "mean_size_per_cell": crowd.mean_per_cell,
+            "half_life_ticks": opt(keep_crowd.half_life),
+            "curve": keep_crowd.curve.iter().map(|(t, s, n)| json!({"ticks": t, "together": s, "pairs": n})).collect::<Vec<_>>(),
+            "gap_within": opt(related_crowd.within),
+            "gap_between_nearby": opt(related_crowd.between_nearby),
+            "gap_between": opt(related_crowd.between),
         },
+        "averages": averages(&last.cells),
         "over_time": over_time,
         "tracked_bodies": bodies.len(),
         "deepest_body_generation": deepest,

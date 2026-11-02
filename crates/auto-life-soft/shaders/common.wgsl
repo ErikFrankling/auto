@@ -68,7 +68,7 @@ fn pcg(v: u32) -> u32 {
     return (w >> 22u) ^ w;
 }
 fn unit_f(r: u32) -> f32 { return f32(r >> 8u) * (1.0 / 16777216.0); }
-fn sat(v: f32, s: f32) -> f32 { return v / (s + v); }
+fn sat(v: f32, s: f32) -> f32 { return v / max(s + v, 1e-9); }
 fn sat4(v: vec4f, s: f32) -> vec4f { return v / (vec4f(s) + v); }
 fn contrast4(a: vec4f, b: vec4f) -> vec4f { return (a - b) / (vec4f(0.05) + a + b); }
 fn squash(x: vec4f) -> vec4f {
@@ -78,7 +78,7 @@ fn squash(x: vec4f) -> vec4f {
 fn maxv(v: vec4f) -> f32 { return max(max(v.x, v.y), max(v.z, v.w)); }
 
 // Spending a little on something barely works, so dabbling in everything is a waste.
-fn effort(a: f32) -> f32 { return a * a / (a + COMMITMENT); }
+fn effort(a: f32) -> f32 { return a * a / max(a + COMMITMENT, 1e-12); }
 
 fn square_of(x: u32, y: u32) -> u32 { return ((y >> POS_SHIFT) << LOG_W) | (x >> POS_SHIFT); }
 fn wrap_sq(x: i32, y: i32) -> u32 {

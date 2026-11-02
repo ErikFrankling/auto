@@ -189,6 +189,12 @@ impl Config {
                 self.f("gap")
             ));
         }
+        // These divide something, so zero would turn a cell's numbers into NaN for ever.
+        for k in ["drag", "e_size", "stick_half", "enzyme_half", "heat_scale", "r_max"] {
+            if self.f(k) <= 0.0 {
+                return Err(format!("{k} must be above 0"));
+            }
+        }
         if self.f("gap") <= 0.0 {
             return Err("gap must be above 0".into());
         }

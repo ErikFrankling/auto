@@ -198,6 +198,12 @@ fn run(args: Args) -> Result<(), String> {
         writeln!(log, "{}", json!({"tiles": tiles, "batch_tile": tile})).map_err(|e| e.to_string())?;
     }
 
+    // What was there before any of the flows counted so far, so the ledger can be checked.
+    let stock_base = {
+        let t = world.tally();
+        let s = world.stock();
+        s.total() - ((t.flow("sun") + t.flow("rain")) as i128 - t.lost())
+    };
     let started = Instant::now();
     let mut last = world.tally();
     let (mut last_tick, mut last_gpu, mut last_wall) = (world.tick, 0.0, 0.0);
@@ -226,12 +232,13 @@ fn run(args: Args) -> Result<(), String> {
             world.flush();
             let wall = started.elapsed().as_secs_f64() - waited;
             let ticks = (world.tick - last_tick).max(1) as f64;
-            let mut r = report(&mut world, &last);
+            let mut r = report(&mut world, &last, stock_base);
             last = world.tally();
             r["seconds"] = json!(wall);
             r["ticks_per_second"] = json!(ticks / (wall - last_wall).max(1e-6));
             r["gpu_ms_per_tick"] = json!((world.gpu_seconds - last_gpu) * 1000.0 / ticks);
             r["longest_submit_ms"] = json!(world.longest_submit_ms);
+            r["mean_submit_ms"] = json!((world.gpu_seconds - last_gpu) * 1000.0 / (world.submits - last_submits).max(1) as f64);
             r["seed"] = json!(world.cfg.seed);
             if let Some(p) = world.profile_report() {
                 let map: Map<String, Value> = p.into_iter().map(|(n, ms)| (n.to_string(), json!(ms))).collect();
@@ -291,7 +298,7 @@ fn run(args: Args) -> Result<(), String> {
 
 /// A line of the log. Flows are totals since the last line, in energy. With the ledger off they
 /// are estimates from one cell in 64. With it on they're exact, and so is the gap.
-fn report(world: &mut World, last: &Tally) -> Value {
+fn report(world: &mut World, last: &Tally, stock_base: i128) -> Value {
     let now = world.tally();
     let stock = world.stock();
     let per_tick = 1.0 / 65536.0;
@@ -332,6 +339,12 @@ fn report(world: &mut World, last: &Tally) -> Value {
         // In and out since the world began.
         r["ledger_in"] = json!((now.flow("sun") + now.flow("rain")) as f64 * per_tick);
         r["ledger_out"] = json!(now.lost() as f64 * per_tick);
+        // Energy now, less what the flows say should be here. Zero, to the last unit, or a rule is wrong.
+        let gap = stock.total() - (stock_base + (now.flow("sun") + now.flow("rain")) as i128 - now.lost());
+        r["ledger_gap_units"] = json!(gap as i64);
+        if gap != 0 {
+            eprintln!("the ledger is out by {gap} units at tick {}", world.tick);
+        }
     }
     r
 }
