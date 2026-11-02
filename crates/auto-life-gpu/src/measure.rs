@@ -182,17 +182,18 @@ pub fn side_by_side(cells: &[(u32, u32, usize)], tile: u32, size: u32, k: usize)
     })
 }
 
-/// How many of a fine clustering's clusters really differ. Cluster centres closer than the typical
-/// distance of a member from its centre are one kind of behaviour cut in pieces, and are merged.
-/// A smooth blob cut into any number of parts gives one group, so unlike picking the number of
-/// clusters by silhouette this doesn't lean to 2. Returns each cluster's group.
+/// How many of a fine clustering's clusters really differ. Two clusters count as one if, along
+/// the line between their centres, the gap is under `MERGE_GAP` of their own spreads. Any lump cut
+/// in pieces gives neighbours about 2.7 to 3.5 apart in those terms, however stretched the lump is,
+/// and groups with a real gap between them give more. So unlike picking the number of clusters
+/// by silhouette, this doesn't lean to 2, and it doesn't lean to the number asked for either.
+/// Returns each cluster's group.
 pub fn merge_close(centres: &[Vec<f32>], points: &[Vec<f32>], label: &[usize]) -> Vec<usize> {
     let k = centres.len();
-    let mut within = 0.0f64;
-    for (p, l) in points.iter().zip(label) {
-        within += dist2(p, &centres[*l]) as f64;
+    let mut members = vec![vec![]; k];
+    for (i, l) in label.iter().enumerate() {
+        members[*l].push(i);
     }
-    let reach = within / points.len().max(1) as f64;
     let mut group: Vec<usize> = (0..k).collect();
     fn find(g: &mut [usize], mut a: usize) -> usize {
         while g[a] != a {
@@ -203,7 +204,21 @@ pub fn merge_close(centres: &[Vec<f32>], points: &[Vec<f32>], label: &[usize]) -
     }
     for a in 0..k {
         for b in a + 1..k {
-            if (dist2(&centres[a], &centres[b]) as f64) < reach {
+            if members[a].len() < 2 || members[b].len() < 2 {
+                continue;
+            }
+            let line: Vec<f32> = centres[a].iter().zip(&centres[b]).map(|(x, y)| y - x).collect();
+            let length = line.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-9);
+            let along = |i: usize| -> f32 { points[i].iter().zip(&line).map(|(p, l)| p * l).sum::<f32>() / length };
+            let spread = |m: &[usize]| -> (f32, f32) {
+                let n = m.len() as f32;
+                let mean = m.iter().map(|i| along(*i)).sum::<f32>() / n;
+                (mean, m.iter().map(|i| (along(*i) - mean).powi(2)).sum::<f32>() / n)
+            };
+            let (ma, va) = spread(&members[a]);
+            let (mb, vb) = spread(&members[b]);
+            let gap = (ma - mb).abs() / ((va + vb) / 2.0).sqrt().max(1e-9);
+            if gap < MERGE_GAP {
                 let (x, y) = (find(&mut group, a), find(&mut group, b));
                 if x != y {
                     group[x] = y;
@@ -220,6 +235,8 @@ pub fn merge_close(centres: &[Vec<f32>], points: &[Vec<f32>], label: &[usize]) -
         })
         .collect()
 }
+
+const MERGE_GAP: f32 = 4.0;
 
 pub fn dist2(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| (x - y) * (x - y)).sum()

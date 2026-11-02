@@ -605,7 +605,8 @@ fn depth_log(world: &mut World, cells: &[Sample], out: &mut Value) {
         out["child_size_hist"] = json!(hist);
         out["child_energy"] = json!(round3(d[G_CHILD_E] as f32 / 16.0 / born.max(1.0)));
 
-        // Scent ahead against the sides, for cells that hardly emit. 0 is what chance gives.
+        // Scent on the side a cell turned to, against the mirror side, for cells that hardly emit.
+        // Its own trail cancels, and 0 is what chance gives.
         let n = d[G_FOLLOW_N] as f32;
         let follow: Vec<f32> = (0..4)
             .map(|k| round3(d[G_FOLLOW + k] as i32 as f32 / 256.0 / n.max(1.0)))

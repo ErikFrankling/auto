@@ -113,11 +113,48 @@ None of this predicts trails or raids. The note found no case of those evolving 
 
 ## What changed after running
 
-Nothing yet. This section is added to after small runs and doesn't replace what's above.
+Everything above was committed before any world ran, and is left as written, so the appendix still has the numbers from then. Runs so far are only on the software driver at 128 squares, up to 12,000 ticks, mostly on one seed. They show that the rules work and worlds live, and say nothing yet about whether any prediction is right. The note warns that diversity appears late, and that small worlds can't hold many ways of living.
+
+**Settings changed, because fresh worlds didn't get going.**
+
+| Setting | Was | Now | Why |
+|---|---|---|---|
+| `mineral_flow` | 0.005 | 0.02 | With 0.005 and start 0.25, a world shrank from 157 cells to 87 by tick 4000 (control 2702). A sitter waits about 800 ticks per mineral, and young brains barely walk |
+| `mineral_start` | 0.25 | 0.5 | At tick 6000: 149 cells at 0.25 with flow 0.02, 709 at 0.5, against 4068 in the control |
+| `rain_burst_ticks`, for mineral worlds only | 3000 | 12000 | With every rule on, seed 2 fell from 152 cells to 6 by tick 8000, and to 3 by 12,000, while seed 1 reached 1807. With the longer start, seed 2 had 268 at tick 8000. Seed 3 was the same, and seed 4 about 10% lower. It only adds newcomers while a world is under 1% full |
+
+So the density cap in worlds now starts at 0.5, not the 0.25 argued for above. On evolved worlds 0.25 may still be the better setting, so the screen samples 0.08 to 1.2.
+
+**Measures changed, because the first versions were wrong.**
+
+- `follows_others_scent` first compared scent ahead with the sides. It read negative for every channel in every world, -0.02 to -0.18, because a cell's own trail lies behind it, and even a cell that "hardly emits" lays scent. It now compares the side a cell turned to with the mirror side, so its own trail cancels. In the controls it now reads about -0.02 to +0.01. It isn't a clean zero: mineral worlds reach -0.07, where cells are sparse, so don't read anything into small values.
+- The fine strategy count first merged cluster centres closer than a member's distance from its centre. Brain data is stretched along its main axes, so nothing merged and the count was 12 of 12 at nearly every level. It now asks how wide the gap is along the line between two centres, against their spreads. The control gives 1 or 2, and its tests include a stretched lump cut into 12.
+
+**A bug the ledger found.** With every rule on, the energy gap reached 6.7%. No energy was being made: on the software driver, once the shader was this large, each death stored 0 instead of "no position", so dead cells were counted as alive. The cause isn't known, and writing the whole record fixes it there. A second effect of the same kind is still open: with all 15 rules on at once, turning the ledger on changes one cell's choice to step. Mixes drawn as the screen draws them showed neither. See RULES.md, under "Still unverified".
+
+**First numbers, for what they're worth** (128 squares, tick 12,000, seed 1 unless given).
+
+| World | Cells | Limited by energy, mineral, both | `gain_per_bite` n=0, n=1 | `key_tracking` | Mean child energy | Fine strategies |
+|---|---|---|---|---|---|---|
+| Control | 3250 | 0.85, 0, 0 | 0.15, 0.08 | | 4.0 | 1 |
+| `gang_on`, `max_energy=80` | 3901 | 0.84, 0, 0 | 0.22, 0.05 | | 4.1 | 4 |
+| `coat_on` | 3647 | 0.89, 0, 0 | 0.04, 0.02 | -0.11 | 4.0 | 2 |
+| `coat_on`, `coat_sense` | 3649 | 0.88, 0, 0 | 0.04, 0.01 | 0.02 | 4.0 | 4 |
+| `mineral_on` | 617 | 0.35, 0.34, 0.31 | 0.29, none | | 4.0 | 5 |
+| `mineral_on`, seed 2 | 1063 | 0.30, 0.32, 0.38 | | | 4.0 | |
+| `birth_choice` | 4100 | 0.79, 0, 0 | 0.09, 0.11 | | 0.94 | 8 |
+| All together, without `coat_sense` | 1807 | 0.18, 0.55, 0.25 | 0.08, 0.11 | 0.09 | 3.1 | 2 |
+
+Read against the predictions, without claiming anything:
+
+- **Numbers pay:** not seen. Bites with company earn less than bites alone in nearly every world, and `extras` stays about level with `extras_control`. Too early to say.
+- **Key tracking:** not seen, around 0. Bite income falls to about a quarter of the control's, which fits the rule being a tax so far, one of the ways it can go wrong.
+- **Mineral:** energy and mineral each limit about a third of cells, the balance wanted. But populations are a fifth to just over a third of the control's.
+- **Child size:** the one prediction with even a hint. Mean child energy is 0.94 where energy limits births, and 3.1 where mineral does, as argued above. That's one seed at one size.
 
 ## Appendix: the calculations
 
-Output of `predictions_calc.py`.
+Output of `predictions_calc.py`, as it was before any world ran, with `mineral_flow` at 0.005 and `mineral_start` at 0.25. The script reads `defaults.json`, so running it now gives different numbers for mineral.
 
 ## Rule 1: one tick's take, per head, by N. Attackers already biting, target with all other sides empty.
 

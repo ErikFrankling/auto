@@ -755,12 +755,15 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
                 }
             }
         }
-        // Scent ahead against scent to the sides, for cells that hardly emit: what it follows
-        // can't be its own. Directed at 0 by chance, whatever the shape of the field.
-        if (w0.y * MOVE_RATE > 0.05 && stat[s].b1.y < 0.02) {
-            let side_a = sq(lx, ly, dx8((d + 2u) & 7u), dy8((d + 2u) & 7u));
-            let side_b = sq(lx, ly, dx8((d + 6u) & 7u), dy8((d + 6u) & 7u));
-            let along = contrast4(fb[front], (fb[side_a] + fb[side_b]) * 0.5);
+        // When a cell that hardly emits turns, is there more scent on the side it turned to than
+        // on the mirror-image side? Its own trail lies behind it, the same on both sides, so
+        // this is about scent it didn't lay, and 0 is what chance gives. Comparing ahead with
+        // the sides doesn't work: the trail behind makes that negative for any cell on the move.
+        let turn = (d + 8u - old_dir) & 7u;
+        if (turn != 0u && turn != 4u && w0.y * MOVE_RATE > 0.05 && stat[s].b1.y < 0.05) {
+            let mirror = (old_dir + 8u - turn) & 7u;
+            let other_side = sq(lx, ly, dx8(mirror), dy8(mirror));
+            let along = contrast4(fb[front], fb[other_side]);
             atomicAdd(&ctr[G_FOLLOW_N], 1u);
             atomicAdd(&ctr[G_FOLLOW], u32(i32(along.x * 256.0)));
             atomicAdd(&ctr[G_FOLLOW + 1u], u32(i32(along.y * 256.0)));

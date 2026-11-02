@@ -126,7 +126,9 @@ RULES = {
     "roads": ({"roads_on": True}, ["track_decay", "track_flow", "road_ease"], []),
     "gang": ({"gang_on": True}, ["gang_sharp"], ["gang_sense"]),
     "coat": ({"coat_on": True}, ["coat_sharp", "coat_floor", "coat_rate", "coat_cost"], ["coat_sense"]),
-    "mineral": ({"mineral_on": True}, ["mineral_start", "mineral_birth", "mineral_flow", "mineral_contrast", "mineral_anti"], []),
+    # Newcomers bring no mineral and young brains don't gather it, so a fresh world can die out
+    # without a longer start. It only adds cells while the world is under 1% full.
+    "mineral": ({"mineral_on": True, "rain_burst_ticks": 12000}, ["mineral_start", "mineral_birth", "mineral_flow", "mineral_contrast", "mineral_anti"], []),
     "birth": ({"birth_choice": True}, ["birth_min", "womb_cap"], []),
     "ageing": ({"age_metabolic": True}, ["age_rest"], []),
 }
@@ -407,7 +409,7 @@ MEASURES = {
     "spread of child sizes": size_spread,
     "busy squares beyond chance": trail_excess,
     "following others' scent": scent_follow,
-    "colonies moved past their radius": lambda r: get(r, "time", "colony_travel", "share_past_own_radius", default=0),
+    "colonies moved past their radius": lambda r: get(r, "time", "colony_travel", "share_past_own_radius", default=0) if get(r, "time", "colony_travel", "tracked", default=0) >= 5 else 0,
     "spread of colony sizes (log10 sd)": lambda r: get(r, "land", "sizes", "log10_sd", default=0),
     "colonies free of terrain": lambda r: 1 - get(r, "land", "explained_by_sun", default=1) if get(r, "land", "sizes", "count", default=0) >= 10 else 0,
 }

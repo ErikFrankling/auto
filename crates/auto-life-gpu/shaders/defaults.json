@@ -185,12 +185,12 @@
   "coat_span": 0.5,
 
   "mineral_on": false,
-  "mineral_start": 0.25,
+  "mineral_start": 0.5,
   "mineral_birth": 1,
   "mineral_rate": 6,
   "mineral_cap": 8,
   "mineral_give": 4,
-  "mineral_flow": 0.005,
+  "mineral_flow": 0.02,
   "mineral_contrast": 1.5,
   "mineral_anti": 0.5,
 
