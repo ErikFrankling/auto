@@ -90,6 +90,7 @@ struct Save {
     fd: Vec<[f32; 4]>,
     cell: Vec<[u32; CELL_WORDS]>,
     stat: Vec<[f32; STAT_WORDS]>,
+    sketch: Vec<[u32; 4]>,
 }
 
 fn read_vec<T: bytemuck::Pod>(f: &mut std::fs::File, at: u64, bytes: u64) -> Vec<T> {
@@ -154,6 +155,7 @@ fn open(path: &str) -> Save {
     let fd = read_vec(&mut f, get("fd").0, get("fd").1);
     let cell = read_vec(&mut f, get("cell").0, get("cell").1);
     let stat = read_vec(&mut f, get("stat").0, get("stat").1);
+    let sketch = read_vec(&mut f, get("sketch").0, get("sketch").1);
     Save {
         size,
         slots,
@@ -170,6 +172,7 @@ fn open(path: &str) -> Save {
         fd,
         cell,
         stat,
+        sketch,
         file: f,
     }
 }
@@ -1333,12 +1336,160 @@ fn brains(w: &mut Save) -> Value {
     })
 }
 
+/// Colours for this world's cells from their genome sketches: the three directions in which its
+/// genomes differ most become red, green and blue, so kin look alike and strangers don't.
+fn genome_colours(w: &Save) -> HashMap<usize, [u8; 3]> {
+    let cells: Vec<usize> = w.occ.iter().filter(|o| **o != 0 && **o != NONE).map(|o| *o as usize - 1).collect();
+    let mut out = HashMap::new();
+    if cells.is_empty() {
+        return out;
+    }
+    let vectors: Vec<[f32; 16]> = cells
+        .iter()
+        .map(|s| {
+            let mut v = [0.0f32; 16];
+            for (word, packed) in w.sketch[*s].iter().enumerate() {
+                for (byte, value) in packed.to_le_bytes().iter().enumerate() {
+                    v[word * 4 + byte] = *value as i8 as f32 / 127.0;
+                }
+            }
+            v
+        })
+        .collect();
+    let n = vectors.len() as f32;
+    let mut mean = [0.0f32; 16];
+    for v in &vectors {
+        for k in 0..16 {
+            mean[k] += v[k] / n;
+        }
+    }
+    let mut cov = [[0.0f32; 16]; 16];
+    for v in &vectors {
+        for a in 0..16 {
+            for b in 0..16 {
+                cov[a][b] += (v[a] - mean[a]) * (v[b] - mean[b]) / n;
+            }
+        }
+    }
+    let mut axes: Vec<[f32; 16]> = vec![];
+    for round in 0..3 {
+        let mut x = [0.0f32; 16];
+        x[round] = 1.0;
+        for k in 0..16 {
+            x[k] += 0.01 * (k as f32 + 1.0);
+        }
+        for _ in 0..60 {
+            let mut y = [0.0f32; 16];
+            for a in 0..16 {
+                for b in 0..16 {
+                    y[a] += cov[a][b] * x[b];
+                }
+            }
+            for axis in &axes {
+                let dot: f32 = (0..16).map(|k| y[k] * axis[k]).sum();
+                for k in 0..16 {
+                    y[k] -= dot * axis[k];
+                }
+            }
+            let norm = y.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-9);
+            for k in 0..16 {
+                x[k] = y[k] / norm;
+            }
+        }
+        axes.push(x);
+    }
+    let along = |v: &[f32; 16], axis: &[f32; 16]| (0..16).map(|k| (v[k] - mean[k]) * axis[k]).sum::<f32>();
+    let spread: Vec<f32> = axes
+        .iter()
+        .map(|axis| (vectors.iter().map(|v| along(v, axis).powi(2)).sum::<f32>() / n).sqrt().max(1e-6))
+        .collect();
+    for (s, v) in cells.iter().zip(&vectors) {
+        let channel = |i: usize| (127.5 + 127.5 * (along(v, &axes[i]) / (2.0 * spread[i])).clamp(-1.0, 1.0)) as u8;
+        out.insert(*s, [channel(0), channel(1), channel(2)]);
+    }
+    out
+}
+
+/// A picture of one world to read by eye, as a PPM. Rock is dark in every panel.
+/// Top row: cells by genome, colours chosen for this world alone; cells by diet (red bites, green ground, blue meat and gifts);
+/// cells by how much they move (blue sits, yellow moves).
+/// Bottom row: sun; every step taken over the run, on a log scale; tracks on the ground if there
+/// are any, otherwise mineral if there's any, otherwise cells by energy.
+fn map_picture(w: &Save, path: &str) {
+    const GAP: usize = 4;
+    let n = w.size;
+    let (width, height) = (n * 3 + GAP * 2, n * 2 + GAP);
+    let mut px = vec![40u8; width * height * 3];
+    let top = |v: &[f32]| v.iter().cloned().fold(1e-6f32, f32::max);
+    let sun: Vec<f32> = (0..n * n).map(|p| w.sun(p)).collect();
+    let sun_top = top(&sun);
+    // Log steps, stretched between the quiet end and the busy end of this world's own traffic,
+    // so paths show if there are any.
+    let steps: Vec<f32> = w.fd.iter().map(|v| (1.0 + v[3]).ln()).collect();
+    let mut ordered: Vec<f32> = (0..n * n).filter(|p| !w.rock(*p)).map(|p| steps[p]).collect();
+    ordered.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+    let at = |share: f64| ordered.get((ordered.len() as f64 * share) as usize).copied().unwrap_or(0.0);
+    let (steps_low, steps_high) = (at(0.02), at(0.998).max(at(0.02) + 1e-3));
+    let genome = genome_colours(w);
+    let tracks: Vec<f32> = w.fd.iter().map(|v| v[0]).collect();
+    let mineral: Vec<f32> = w.fd.iter().map(|v| v[1]).collect();
+    let (tracks_top, mineral_top) = (top(&tracks), top(&mineral));
+    let last = if tracks_top > 1e-3 { 0 } else if mineral_top > 1e-3 { 1 } else { 2 };
+    for y in 0..n {
+        for x in 0..n {
+            let p = y * n + x;
+            let rock = w.rock(p);
+            let o = w.occ[p];
+            let live = o != 0 && o != NONE;
+            let empty = if rock { [18, 20, 30] } else { [0, 0, 0] };
+            let mut colours = [empty; 6];
+            if live {
+                let c = &w.cell[o as usize - 1];
+                let st = &w.stat[o as usize - 1];
+                colours[0] = genome[&(o as usize - 1)];
+                let t = (st[0] + st[1] + st[2] + st[3]).max(1e-6);
+                let shade = |v: f32| (40.0 + 215.0 * v.clamp(0.0, 1.0)) as u8;
+                colours[1] = [shade(st[2] / t), shade(st[0] / t), shade((st[1] + st[3]) / t)];
+                let m = (st[19] * 2.5).clamp(0.0, 1.0);
+                colours[2] = [(255.0 * m) as u8, (230.0 * m) as u8, (255.0 * (1.0 - m)) as u8];
+                if last == 2 {
+                    let e = (f32::from_bits(c[auto_life_gpu::config::cell::E]) / 30.0).clamp(0.0, 1.0);
+                    colours[5] = [(255.0 * e) as u8, (120.0 * e) as u8, 30];
+                }
+            }
+            if !rock {
+                let grey = |v: f32| [(255.0 * v.clamp(0.0, 1.0)) as u8; 3];
+                colours[3] = {
+                    let v = (sun[p] / sun_top).clamp(0.0, 1.0);
+                    [(255.0 * v) as u8, (220.0 * v) as u8, (90.0 * v) as u8]
+                };
+                colours[4] = grey((steps[p] - steps_low) / (steps_high - steps_low));
+                if last == 0 {
+                    colours[5] = grey((tracks[p] / tracks_top).sqrt());
+                } else if last == 1 {
+                    colours[5] = grey(mineral[p] / mineral_top);
+                }
+            }
+            for (panel, colour) in colours.iter().enumerate() {
+                let (cx, cy) = (panel % 3 * (n + GAP) + x, panel / 3 * (n + GAP) + y);
+                let at = (cy * width + cx) * 3;
+                px[at..at + 3].copy_from_slice(colour);
+            }
+        }
+    }
+    let mut out = format!("P6\n{width} {height}\n255\n").into_bytes();
+    out.extend_from_slice(&px);
+    std::fs::write(path, out).unwrap();
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 4 {
-        eprintln!("usage: life-analyse NAME world.bin OUT.json [--tile SIZE]");
+        eprintln!("usage: life-analyse NAME world.bin OUT.json [--tile SIZE] [--maps DIR] [--maps-only]");
         std::process::exit(2);
     }
+    let maps = args.iter().position(|a| a == "--maps").map(|i| args[i + 1].clone());
+    let maps_only = args.iter().any(|a| a == "--maps-only");
     let mut w = open(&args[2]);
     // A batch: every world on the map, measured as if it were alone.
     if let Some(tile) = args.iter().position(|a| a == "--tile").map(|i| args[i + 1].parse::<usize>().expect("--tile SIZE")) {
@@ -1354,6 +1505,12 @@ fn main() {
             w.terrain = rows.iter().flat_map(|r| terrain[*r..*r + tile].iter().copied()).collect();
             w.fd = rows.iter().flat_map(|r| fd[*r..*r + tile].iter().copied()).collect();
             let alive = w.occ.iter().filter(|o| **o != 0 && **o != NONE).count();
+            if let Some(dir) = &maps {
+                map_picture(&w, &format!("{dir}/t{i:03}.ppm"));
+            }
+            if maps_only {
+                continue;
+            }
             // Too few cells to sort into strategies says enough by itself.
             if alive < 50 {
                 tiles.push(json!({"tile": i, "alive": alive, "dead": true}));
@@ -1377,6 +1534,9 @@ fn main() {
             });
             tiles.push(json!({"tile": i, "tick": w.tick, "size": tile, "alive": alive, "economy": e, "brains": b, "trails": trails}));
             eprintln!("{}: tile {i} of {}, {alive} cells", args[1], per_side * per_side);
+        }
+        if maps_only {
+            return;
         }
         let out = json!({"name": args[1], "tick": w.tick, "batch_tile": tile, "tiles": tiles});
         std::fs::write(&args[3], serde_json::to_string(&out).unwrap()).unwrap();
