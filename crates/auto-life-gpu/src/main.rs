@@ -9,12 +9,9 @@ use std::time::Instant;
 
 use auto_life_gpu::report::{Tracker, report};
 use auto_life_gpu::video::{Layout, Recorder, RecorderOptions};
-use auto_life_gpu::{Config, Pacing, World, free_vram, lock_gpu};
+use auto_life_gpu::{Config, Pacing, VRAM_MARGIN, World, free_vram, lock_gpu};
 use clap::Parser;
 use serde_json::json;
-
-/// VRAM always left free for the desktop and everything else.
-const VRAM_MARGIN: u64 = 3 << 30;
 
 #[derive(Parser)]
 struct Args {

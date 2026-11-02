@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::config::{CELL_BYTES, STAT_BYTES};
+use crate::config::{CELL_BYTES, SKETCH_BYTES, STAT_BYTES, cell, stat};
 use crate::world::World;
 
 pub const ACTIONS: [&str; 16] = [
@@ -20,6 +20,14 @@ pub struct Sample {
     pub e: f32,
     pub womb: f32,
     pub age: f32,
+    pub hit: f32,
+    pub voice: [f32; 2],
+    pub flags: u32,
+    /// How a place feels: its upkeep and its drag.
+    pub feel: [f32; 2],
+    pub mate_kids: f32,
+    /// The experiment words, x0 to x3.
+    pub spare: [f32; 4],
     pub pos: u32,
     pub clade: u32,
     pub generation: u32,
@@ -44,6 +52,11 @@ pub struct Samples {
 
 /// Reads scattered runs of slots, enough to hold about `want` live cells.
 pub fn sample(world: &mut World, want: usize) -> Samples {
+    sample_with(world, want, true)
+}
+
+/// The same, optionally without genomes, which are most of the bytes to read.
+pub fn sample_with(world: &mut World, want: usize, with_genomes: bool) -> Samples {
     world.flush();
     let slots = world.cfg.slots as u64;
     let alive = world.alive().max(1) as u64;
@@ -62,9 +75,13 @@ pub fn sample(world: &mut World, want: usize) -> Samples {
     };
     let cell = world.read_ranges("cell", &of(CELL_BYTES));
     let stat = world.read_ranges("stat", &of(STAT_BYTES));
-    let sketch = world.read_ranges("sketch", &of(16));
+    let sketch = world.read_ranges("sketch", &of(SKETCH_BYTES));
     let run_list: Vec<(u64, u64)> = starts.iter().map(|s| (*s, len)).collect();
-    let genome = world.read_genomes(&run_list, genome_bytes);
+    let genome = if with_genomes {
+        world.read_genomes(&run_list, genome_bytes)
+    } else {
+        vec![]
+    };
 
     let mut cells = vec![];
     let mut genomes = vec![];
@@ -73,37 +90,48 @@ pub fn sample(world: &mut World, want: usize) -> Samples {
         let c: &[u8] = &cell[i * CELL_BYTES as usize..(i + 1) * CELL_BYTES as usize];
         let f = |k: usize| f32::from_le_bytes(c[k * 4..k * 4 + 4].try_into().unwrap());
         let u = |k: usize| u32::from_le_bytes(c[k * 4..k * 4 + 4].try_into().unwrap());
-        let (e, age) = (f(0), f(2));
+        let (e, age) = (f(cell::E), f(cell::AGE));
         if e <= 0.0 || age < 1.0 {
             continue;
         }
         let st: &[f32] =
             bytemuck::cast_slice(&stat[i * STAT_BYTES as usize..(i + 1) * STAT_BYTES as usize]);
         let mut sk = [0.0f32; 16];
-        for (k, v) in sketch[i * 16..(i + 1) * 16].iter().enumerate() {
+        for (k, v) in sketch[i * SKETCH_BYTES as usize..(i + 1) * SKETCH_BYTES as usize]
+            .iter()
+            .enumerate()
+        {
             sk[k] = (*v as i8) as f32 / 127.0 * SKETCH_RANGE;
         }
-        let g = &genome[i * genome_bytes as usize..(i + 1) * genome_bytes as usize];
         let genome_at = genomes.len();
-        genomes.extend(g.iter().map(|b| *b as i8));
+        if with_genomes {
+            let g = &genome[i * genome_bytes as usize..(i + 1) * genome_bytes as usize];
+            genomes.extend(g.iter().map(|b| *b as i8));
+        }
         let arr4 = |k: usize| -> [f32; 4] { st[k..k + 4].try_into().unwrap() };
         let mut budget = [0.0f32; 16];
-        budget[..12].copy_from_slice(&st[4..16]);
-        budget[12..].copy_from_slice(&st[28..32]);
+        budget[..12].copy_from_slice(&st[stat::BUDGET..stat::BUDGET + 12]);
+        budget[12..].copy_from_slice(&st[stat::SPARE..stat::SPARE + 4]);
         cells.push(Sample {
             e,
-            womb: f(1),
+            womb: f(cell::WOMB),
             age,
-            pos: u(10),
-            clade: u(12),
-            generation: u(13),
-            x: [f(4), f(5), f(6), f(7)],
-            diet: arr4(0),
+            hit: f(cell::HIT),
+            voice: [f(cell::VOICE), f(cell::VOICE + 1)],
+            flags: u(cell::FLAGS),
+            feel: [f(cell::FEEL_U), f(cell::FEEL_D)],
+            mate_kids: f(cell::MATE_KIDS),
+            spare: std::array::from_fn(|k| f(cell::SPARE + k)),
+            pos: u(cell::POS),
+            clade: u(cell::CLADE),
+            generation: u(cell::GEN),
+            x: std::array::from_fn(|k| f(cell::HARD + k)),
+            diet: arr4(stat::DIET),
             budget,
-            chase: arr4(16),
-            follow: arr4(20),
-            misc: arr4(24),
-            measures: arr4(32),
+            chase: arr4(stat::CHASE),
+            follow: arr4(stat::FOLLOW),
+            misc: arr4(stat::MISC),
+            measures: arr4(stat::MEASURES),
             sketch: sk,
             genome_at,
         });
@@ -426,7 +454,13 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
         "rained": rained,
         "births_no_slot": no_slot,
     });
-    if world.cfg.physics.get("plants_meter").and_then(Value::as_bool) == Some(true) {
+    if world
+        .cfg
+        .physics
+        .get("plants_meter")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
         // Sampled one tick in 256 at 256 counts per unit: over ticks in a log step, it's sun per tick.
         out["sun_taken"] = json!(sun_taken);
     }
@@ -644,8 +678,12 @@ pub fn dump(world: &mut World, path: &str, want: usize) -> Result<(), String> {
     let runs = need.div_ceil(RUN).max(1);
     let gap = (slots / runs).max(1);
     let len = RUN.min(slots);
-    let starts: Vec<u64> = (0..runs).map(|k| (k * gap).min(slots.saturating_sub(len))).collect();
-    let of = |stride: u64| -> Vec<(u64, u64)> { starts.iter().map(|s| (s * stride, len * stride)).collect() };
+    let starts: Vec<u64> = (0..runs)
+        .map(|k| (k * gap).min(slots.saturating_sub(len)))
+        .collect();
+    let of = |stride: u64| -> Vec<(u64, u64)> {
+        starts.iter().map(|s| (s * stride, len * stride)).collect()
+    };
     let cell = world.read_ranges("cell", &of(CELL_BYTES));
     let stat = world.read_ranges("stat", &of(STAT_BYTES));
     let run_list: Vec<(u64, u64)> = starts.iter().map(|s| (*s, len)).collect();
@@ -669,14 +707,25 @@ pub fn dump(world: &mut World, path: &str, want: usize) -> Result<(), String> {
         }
     }
     let head = json!({"tick": world.tick, "size": size, "alive": alive, "count": kept.len(), "genome_bytes": genome_bytes, "hidden_rows": world.cfg.hidden_rows, "physics": world.cfg.physics, "layout": crate::config::layout_json()}).to_string();
-    let w = |f: &mut std::io::BufWriter<std::fs::File>, b: &[u8]| f.write_all(b).map_err(|e| e.to_string());
+    let w = |f: &mut std::io::BufWriter<std::fs::File>, b: &[u8]| {
+        f.write_all(b).map_err(|e| e.to_string())
+    };
     w(&mut f, &(head.len() as u64).to_le_bytes())?;
     w(&mut f, head.as_bytes())?;
     w(&mut f, &map)?;
     for i in kept {
-        w(&mut f, &cell[i * CELL_BYTES as usize..(i + 1) * CELL_BYTES as usize])?;
-        w(&mut f, &stat[i * STAT_BYTES as usize..(i + 1) * STAT_BYTES as usize])?;
-        w(&mut f, &genome[i * genome_bytes as usize..(i + 1) * genome_bytes as usize])?;
+        w(
+            &mut f,
+            &cell[i * CELL_BYTES as usize..(i + 1) * CELL_BYTES as usize],
+        )?;
+        w(
+            &mut f,
+            &stat[i * STAT_BYTES as usize..(i + 1) * STAT_BYTES as usize],
+        )?;
+        w(
+            &mut f,
+            &genome[i * genome_bytes as usize..(i + 1) * genome_bytes as usize],
+        )?;
     }
     Ok(())
 }

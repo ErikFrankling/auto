@@ -3,12 +3,31 @@
 //! cell shows or smells of is something its own brain chose.
 
 pub mod config;
+pub mod explore;
 pub mod report;
 pub mod video;
 pub mod world;
 
 pub use config::Config;
 pub use world::{Pacing, World};
+
+/// VRAM always left free for the desktop and everything else.
+pub const VRAM_MARGIN: u64 = 3 << 30;
+
+/// Whether another GPU job holds the job locks right now. An open window shouldn't
+/// queue behind them or hold them for hours, but it can see them and go gently.
+pub fn gpu_busy_elsewhere() -> bool {
+    ["/tmp/auto-gpu.lock", "/tmp/cars-gpu.lock"]
+        .iter()
+        .any(|path| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(path)
+                .is_ok_and(|f| f.try_lock().is_err())
+        })
+}
 
 /// Waits for the GPU. One job at a time on this machine, and cars jobs share the card.
 /// Hold the returned files until the job is done.

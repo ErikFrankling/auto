@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Opens the life simulator: ./life
+# Builds it first if anything changed. Anything after ./life goes to the program,
+# for example ./life --load world.bin or ./life --size 1024 --seed 7
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")"
+# Builds live in this checkout, so they survive a reboot and each checkout has its own.
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PWD/target}"
+export RUSTFLAGS="${RUSTFLAGS:--C target-cpu=native}"
+binary="$CARGO_TARGET_DIR/release/life-app"
+mkdir -p "$CARGO_TARGET_DIR"
+
+# The Nix environment changes only with the flake, and asking Nix for it can take
+# a long time on a busy machine, so it's kept next to the build.
+stamp="$(cat flake.nix flake.lock | sha256sum | cut -c1-16)"
+environment="$CARGO_TARGET_DIR/nix-env-$stamp.sh"
+if [ ! -s "$environment" ]; then
+  echo "Getting the build environment from Nix."
+  nix print-dev-env > "$environment.new"
+  mv "$environment.new" "$environment"
+fi
+set +eu
+# shellcheck disable=SC1090
+source "$environment" > /dev/null
+set -eu
+
+if [ ! -x "$binary" ]; then
+  echo "Building the app for the first time. This takes a few minutes."
+fi
+cargo build --release -p auto-life-app --quiet
+exec "$binary" "$@"

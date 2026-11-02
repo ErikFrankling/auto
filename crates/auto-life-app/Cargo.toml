@@ -1,0 +1,22 @@
+[package]
+name = "auto-life-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "life-app"
+path = "src/main.rs"
+
+[dependencies]
+auto-core = { path = "../auto-core" }
+auto-life-gpu = { path = "../auto-life-gpu" }
+wgpu.workspace = true
+winit.workspace = true
+pollster.workspace = true
+bytemuck.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+egui = { version = "0.37", features = ["default_fonts", "rayon"] }
+egui-wgpu = { version = "0.37", default-features = false, features = ["winit", "wayland"] }
+egui-winit = { version = "0.37", default-features = false, features = ["wayland", "x11", "clipboard"] }

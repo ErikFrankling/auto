@@ -7,12 +7,17 @@
 //! get the last ones depends on timing.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use auto_core::{Gpu, GpuOptions};
 use bytemuck::{Pod, Zeroable};
 
-use crate::config::{CELL_BYTES, CELL_WORDS, Config, STAT_BYTES, check_layout, layout_json};
+use crate::config::{
+    CELL_BYTES, CELL_WORDS, Config, SKETCH_BYTES, STAT_BYTES, cell as fields, check_layout,
+    layout_json,
+};
 
 const RING_ENTRIES: usize = 4096;
 const WGSL_STRUCTS: &str = r#"
@@ -101,7 +106,10 @@ pub struct Pacing {
 }
 
 pub struct World {
-    pub gpu: Gpu,
+    /// Shared, so a window can draw with the same device the world runs on.
+    pub gpu: Arc<Gpu>,
+    /// How far a save or load has got, in thousandths. For showing progress.
+    pub progress: Arc<AtomicU32>,
     pub cfg: Config,
     pub tick: u64,
     pub sun_k: f32,
@@ -163,6 +171,34 @@ impl World {
             adapter_name,
             ..Default::default()
         }))?;
+        Self::with_gpu(Arc::new(gpu), cfg, pacing)
+    }
+
+    /// A new world on a device someone else also uses, such as a window.
+    pub fn with_gpu(gpu: Arc<Gpu>, cfg: Config, pacing: Pacing) -> Result<World, String> {
+        let mut w = Self::allocate(gpu, cfg, pacing)?;
+        w.build_terrain()?;
+        Ok(w)
+    }
+
+    /// Reopens a saved world, with the shape and physics it was saved with. Physics
+    /// keys the file doesn't have keep their current defaults.
+    pub fn open_saved(
+        gpu: Arc<Gpu>,
+        path: &str,
+        shaders: Option<std::path::PathBuf>,
+        pacing: Pacing,
+        progress: Arc<AtomicU32>,
+    ) -> Result<World, String> {
+        let cfg = Config::from_save(path, shaders)?;
+        let mut w = Self::allocate(gpu, cfg, pacing)?;
+        w.progress = progress;
+        w.load(path)?;
+        Ok(w)
+    }
+
+    /// Buffers and pipelines, with nothing in the buffers yet.
+    fn allocate(gpu: Arc<Gpu>, cfg: Config, pacing: Pacing) -> Result<World, String> {
         let device = &gpu.device;
         let squares = cfg.size as u64 * cfg.size as u64;
         let slots = cfg.slots as u64;
@@ -187,7 +223,7 @@ impl World {
             ("fd", "vec4f", squares * 16, copy),
             ("cell", "Cell", slots * CELL_BYTES, copy),
             ("stat", "Stat", slots * STAT_BYTES, copy),
-            ("sketch", "vec4u", slots * 16, copy),
+            ("sketch", "vec4u", slots * SKETCH_BYTES, copy),
             ("mem", "vec4f", slots * cfg.hidden_rows as u64 * 16, copy),
             (
                 "genome",
@@ -236,79 +272,6 @@ impl World {
             mapped_at_creation: false,
         });
 
-        let mk =
-            |file: &str, entry: &str, binds: &[(&'static str, Access)]| -> Result<Pipe, String> {
-                let (pipeline, group, _) = build_pipe(
-                    &gpu, &cfg, &buffers, &elems, &frames, file, entry, binds, None,
-                )?;
-                Ok(Pipe { pipeline, group })
-            };
-        let tick_binds: &[(&'static str, Access)] = &[("ctr", RW), ("ctl", RW), ("args", RW)];
-        let pipes = vec![
-            mk("tick.wgsl", "start", tick_binds)?,
-            mk("tick.wgsl", "finish", tick_binds)?,
-            mk(
-                "rain.wgsl",
-                "main",
-                &[
-                    ("occ", RW),
-                    ("seen_next", RW),
-                    ("cell", RW),
-                    ("stat", RW),
-                    ("mem", RW),
-                    ("ring", R),
-                    ("ctr", RW),
-                    ("ctl", R),
-                    ("jobs", RW),
-                ],
-            )?,
-            mk(
-                "act.wgsl",
-                "main",
-                &[
-                    ("occ", RW),
-                    ("seen", R),
-                    ("seen_next", RW),
-                    ("terrain", R),
-                    ("fa", RW),
-                    ("fb", RW),
-                    ("fc", RW),
-                    ("fd", RW),
-                    ("cell", RW),
-                    ("stat", RW),
-                    ("sketch", R),
-                    ("mem", RW),
-                    ("genome", R),
-                    ("ring", RW),
-                    ("ctr", RW),
-                    ("ctl", R),
-                    ("jobs", RW),
-                ],
-            )?,
-            mk(
-                "births.wgsl",
-                "main",
-                &[
-                    ("jobs", R),
-                    ("genome", RW),
-                    ("sketch", RW),
-                    ("ctr", RW),
-                    ("ctl", R),
-                ],
-            )?,
-            mk(
-                "sweep.wgsl",
-                "main",
-                &[
-                    ("terrain", R),
-                    ("fa", RW),
-                    ("fb", RW),
-                    ("fc", RW),
-                    ("fd", RW),
-                    ("ctr", RW),
-                ],
-            )?,
-        ];
         let bake_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("bake uniform"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -322,39 +285,13 @@ impl World {
                 count: None,
             }],
         });
-        let (bake_pipe, bake_group0, _) = build_pipe(
-            &gpu,
-            &cfg,
-            &buffers,
-            &elems,
-            &frames,
-            "bake.wgsl",
-            "main",
-            &[("cell", RW), ("sketch", R), ("ctr", RW)],
-            Some(&bake_layout),
-        )?;
-        let (census_pipe, census_group0, _) = build_pipe(
-            &gpu,
-            &cfg,
-            &buffers,
-            &elems,
-            &frames,
-            "census.wgsl",
-            "main",
-            &[
-                ("occ", R),
-                ("cell", R),
-                ("stat", R),
-                ("tiles", RW),
-                ("ctr", RW),
-            ],
-            None,
-        )?;
+        let built = build_sim_pipes(&gpu, &cfg, &buffers, &elems, &frames, &bake_layout)?;
 
         let rng = cfg.seed as u64 ^ 0xA5A5_5A5A_1234_5678;
         let size_now = cfg.size;
-        let mut w = World {
+        Ok(World {
             gpu,
+            progress: Arc::new(AtomicU32::new(0)),
             sun_k: 0.0,
             open: 0,
             start_ground: 0.0,
@@ -366,7 +303,7 @@ impl World {
             submits: 0,
             buffers,
             elems,
-            pipes,
+            pipes: built.pipes,
             frames,
             stride,
             pending: vec![],
@@ -376,15 +313,94 @@ impl World {
             act_splits: (size_now / 4096).max(1),
             sweep_splits: (size_now / 1024).max(1),
             rng,
-            bake_pipe,
+            bake_pipe: built.bake_pipe,
             bake_layout,
-            bake_group0,
-            census_pipe,
-            census_group0,
+            bake_group0: built.bake_group0,
+            census_pipe: built.census_pipe,
+            census_group0: built.census_group0,
             cfg,
+        })
+    }
+
+    /// Changes physics on the running world. Everything in the buffers stays as it
+    /// is, and the next tick runs by the new rules. If the new shaders don't build,
+    /// the old rules stay.
+    pub fn set_physics(
+        &mut self,
+        physics: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        self.flush();
+        let mut cfg = self.cfg.clone();
+        cfg.physics = physics;
+        let scope = self
+            .gpu
+            .device
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let built = build_sim_pipes(
+            &self.gpu,
+            &cfg,
+            &self.buffers,
+            &self.elems,
+            &self.frames,
+            &self.bake_layout,
+        );
+        if let Some(e) = pollster::block_on(scope.pop()) {
+            return Err(e.to_string());
+        }
+        let built = built?;
+        let sun_changed = self.cfg.f("sun") != cfg.f("sun")
+            || (self.cfg.f("season_ticks") > 0.0) != (cfg.f("season_ticks") > 0.0);
+        self.pipes = built.pipes;
+        self.bake_pipe = built.bake_pipe;
+        self.bake_group0 = built.bake_group0;
+        self.census_pipe = built.census_pipe;
+        self.census_group0 = built.census_group0;
+        self.cfg = cfg;
+        if sun_changed {
+            let (_, mean_base, _) = self.measure_terrain();
+            self.sun_k = self.sun_scale(mean_base);
+        }
+        Ok(())
+    }
+
+    fn sun_scale(&self, mean_base: f64) -> f32 {
+        let season_mean = if self.cfg.f("season_ticks") > 0.0 {
+            0.55
+        } else {
+            1.0
         };
-        w.build_terrain()?;
-        Ok(w)
+        (self.cfg.f("sun") as f64 / (mean_base * season_mean).max(1e-9)) as f32
+    }
+
+    /// Samples the terrain: share of open squares, their mean sun, and the ground food they start with.
+    fn measure_terrain(&self) -> (f64, f64, f64) {
+        let w = self.cfg.size;
+        let (mut base, mut open, mut seen) = (0.0f64, 0u64, 0u64);
+        let rows_wanted = 256.min(w);
+        let step = (w / rows_wanted).max(1);
+        let ranges: Vec<(u64, u64)> = (0..rows_wanted)
+            .map(|k| ((k * step) as u64 * w as u64 * 4, w as u64 * 4))
+            .collect();
+        let bytes = self.read_ranges("terrain", &ranges);
+        let mut ground_sum = 0.0f64;
+        for v in bytemuck::cast_slice::<u8, u32>(&bytes) {
+            seen += 1;
+            if v & (1 << 24) == 0 {
+                open += 1;
+                base += (v & 0xFFFF) as f64 / 65535.0 * crate::config::SUN_RANGE as f64;
+                let b = (v & 0xFFFF) as f32 / 65535.0 * crate::config::SUN_RANGE;
+                ground_sum += self
+                    .cfg
+                    .f("ground_cap")
+                    .min(b * 2.0 * self.cfg.f("sun") / 0.05) as f64;
+            }
+        }
+        let squares = w as f64 * w as f64;
+        (
+            open as f64 / seen.max(1) as f64,
+            base / open.max(1) as f64,
+            ground_sum * squares / seen.max(1) as f64,
+        )
     }
 
     /// A pipeline over the world's buffers. Used here and by the video recorder.
@@ -407,6 +423,35 @@ impl World {
             &self.elems,
             &self.frames,
             file,
+            entry,
+            &binds,
+            group1,
+        )?;
+        Ok((p, g))
+    }
+
+    /// Like `extra_pipe`, with the shader's text given rather than named.
+    #[allow(clippy::type_complexity)]
+    pub fn extra_pipe_source(
+        &self,
+        label: &str,
+        source: &str,
+        entry: &str,
+        binds: &[(&'static str, Access2)],
+        group1: Option<&wgpu::BindGroupLayout>,
+    ) -> Result<(wgpu::ComputePipeline, wgpu::BindGroup), String> {
+        let binds: Vec<(&'static str, Access)> = binds
+            .iter()
+            .map(|(n, a)| (*n, if matches!(a, Access2::Read) { R } else { RW }))
+            .collect();
+        let (p, g, _) = build_pipe_source(
+            &self.gpu,
+            &self.cfg,
+            &self.buffers,
+            &self.elems,
+            &self.frames,
+            label,
+            source,
             entry,
             &binds,
             group1,
@@ -470,7 +515,7 @@ impl World {
                 pass.dispatch_workgroups(w.div_ceil(64), band.min(w - row), 1);
             }
             self.gpu.queue.submit([enc.finish()]);
-            self.gpu.wait();
+            self.wait_gpu();
             row += band;
         }
         let frame = Frame {
@@ -489,7 +534,7 @@ impl World {
             pass.dispatch_workgroups(1024, self.cfg.slots.div_ceil(65536), 1);
         }
         self.gpu.queue.submit([enc.finish()]);
-        self.gpu.wait();
+        self.wait_gpu();
 
         // The ring holds every slot, so head starts one lap ahead of tail.
         let mut ctr = [0u32; 32];
@@ -499,37 +544,11 @@ impl World {
             .write_buffer(&self.buffers["ctr"], 0, bytemuck::cast_slice(&ctr));
 
         // Sample the terrain to scale the sun so its mean is what was asked for.
-        let (mut base, mut open, mut seen) = (0.0f64, 0u64, 0u64);
-        let rows_wanted = 256.min(w);
-        let step = (w / rows_wanted).max(1);
-        let ranges: Vec<(u64, u64)> = (0..rows_wanted)
-            .map(|k| ((k * step) as u64 * w as u64 * 4, w as u64 * 4))
-            .collect();
-        let bytes = self.read_ranges("terrain", &ranges);
-        let mut ground_sum = 0.0f64;
-        for v in bytemuck::cast_slice::<u8, u32>(&bytes) {
-            seen += 1;
-            if v & (1 << 24) == 0 {
-                open += 1;
-                base += (v & 0xFFFF) as f64 / 65535.0 * crate::config::SUN_RANGE as f64;
-                let b = (v & 0xFFFF) as f32 / 65535.0 * crate::config::SUN_RANGE;
-                ground_sum += self
-                    .cfg
-                    .f("ground_cap")
-                    .min(b * 2.0 * self.cfg.f("sun") / 0.05) as f64;
-            }
-        }
+        let (open_frac, mean_base, start_ground) = self.measure_terrain();
         let squares = w as f64 * w as f64;
-        let open_frac = open as f64 / seen.max(1) as f64;
         self.open = (squares * open_frac) as u64;
-        self.start_ground = ground_sum * squares / seen.max(1) as f64;
-        let mean_base = base / open.max(1) as f64;
-        let season_mean = if self.cfg.f("season_ticks") > 0.0 {
-            0.55
-        } else {
-            1.0
-        };
-        self.sun_k = (self.cfg.f("sun") as f64 / (mean_base * season_mean).max(1e-9)) as f32;
+        self.start_ground = start_ground;
+        self.sun_k = self.sun_scale(mean_base);
         let ctl = [
             self.cfg.slots,
             0,
@@ -544,7 +563,7 @@ impl World {
             .queue
             .write_buffer(&self.buffers["ctl"], 0, bytemuck::cast_slice(&ctl));
         self.gpu.queue.submit([]);
-        self.gpu.wait();
+        self.wait_gpu();
         Ok(())
     }
 
@@ -673,6 +692,24 @@ impl World {
         }
     }
 
+    /// Waits for everything submitted. On a device shared with a window this polls, because
+    /// a blocking wait also blocks the window from submitting anything until it ends.
+    fn wait_gpu(&self) {
+        if Arc::strong_count(&self.gpu) == 1 {
+            self.gpu.wait();
+            return;
+        }
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        self.gpu
+            .queue
+            .on_submitted_work_done(move || flag.store(true, Ordering::Release));
+        while !done.load(Ordering::Acquire) {
+            let _ = self.gpu.device.poll(wgpu::PollType::Poll);
+            std::thread::sleep(Duration::from_micros(100));
+        }
+    }
+
     /// Sends everything queued, waits for it, then adjusts the size of the next
     /// submission so each stays near the target length.
     pub fn flush(&mut self) {
@@ -738,7 +775,7 @@ impl World {
         }
         let started = Instant::now();
         self.gpu.queue.submit([enc.finish()]);
-        self.gpu.wait();
+        self.wait_gpu();
         let ms = started.elapsed().as_secs_f64() * 1000.0;
         self.submits += 1;
         self.gpu_seconds += ms / 1000.0;
@@ -787,7 +824,7 @@ impl World {
         staging
             .slice(..)
             .map_async(wgpu::MapMode::Read, |r| r.expect("map"));
-        self.gpu.wait();
+        self.wait_gpu();
         let out = staging.get_mapped_range(..).expect("mapped").to_vec();
         staging.unmap();
         out
@@ -835,7 +872,7 @@ impl World {
                 pass.dispatch_workgroups(tiles.div_ceil(16), band.min(tiles - row), 1);
             }
             self.gpu.queue.submit([enc.finish()]);
-            self.gpu.wait();
+            self.wait_gpu();
             row += band;
         }
         let n = tiles as u64 * tiles as u64 * 48;
@@ -873,7 +910,7 @@ impl World {
             pass.dispatch_workgroups(1024, self.cfg.slots.div_ceil(65536), 1);
         }
         self.gpu.queue.submit([enc.finish()]);
-        self.gpu.wait();
+        self.wait_gpu();
     }
 
     /// Writes one frame uniform and returns nothing else. For the recorder's own passes.
@@ -902,6 +939,12 @@ impl World {
         f.write_all(&(head.len() as u64).to_le_bytes())
             .map_err(|e| e.to_string())?;
         f.write_all(head.as_bytes()).map_err(|e| e.to_string())?;
+        let total: u64 = self
+            .saved_names()
+            .iter()
+            .map(|n| self.buffers[n].size())
+            .sum();
+        let mut done = 0;
         for name in self.saved_names() {
             let size = self.buffers[name].size();
             let mut at = 0;
@@ -910,6 +953,9 @@ impl World {
                 let bytes = self.read_ranges(name, &[(at, n)]);
                 f.write_all(&bytes).map_err(|e| e.to_string())?;
                 at += n;
+                done += n;
+                self.progress
+                    .store((done * 1000 / total.max(1)) as u32, Ordering::Relaxed);
             }
         }
         Ok(())
@@ -944,6 +990,12 @@ impl World {
         self.open = head["open"].as_u64().unwrap_or(0);
         self.start_ground = head["start_ground"].as_f64().unwrap_or(0.0);
         let mut chunk = vec![0u8; 64 << 20];
+        let total: u64 = self
+            .saved_names()
+            .iter()
+            .map(|n| self.buffers[n].size())
+            .sum();
+        let mut done = 0;
         for name in self.saved_names() {
             let size = self.buffers[name].size();
             let mut at = 0;
@@ -955,8 +1007,11 @@ impl World {
                     .queue
                     .write_buffer(&self.buffers[name], at, &chunk[..n as usize]);
                 self.gpu.queue.submit([]);
-                self.gpu.wait();
+                self.wait_gpu();
                 at += n;
+                done += n;
+                self.progress
+                    .store((done * 1000 / total.max(1)) as u32, Ordering::Relaxed);
             }
         }
         Ok(())
@@ -999,6 +1054,139 @@ fn bands(total: u32, splits: u32) -> Vec<(u32, u32)> {
         .collect()
 }
 
+/// Every pipeline that steps the world. Physics settings are constants in the
+/// shaders, so a change of physics means building these again.
+#[allow(clippy::type_complexity)]
+fn build_sim_pipes(
+    gpu: &Gpu,
+    cfg: &Config,
+    buffers: &HashMap<&'static str, wgpu::Buffer>,
+    elems: &HashMap<&'static str, &'static str>,
+    frames: &wgpu::Buffer,
+    bake_layout: &wgpu::BindGroupLayout,
+) -> Result<SimPipes, String> {
+    let mk = |file: &str, entry: &str, binds: &[(&'static str, Access)]| -> Result<Pipe, String> {
+        let (pipeline, group, _) =
+            build_pipe(gpu, cfg, buffers, elems, frames, file, entry, binds, None)?;
+        Ok(Pipe { pipeline, group })
+    };
+    let tick_binds: &[(&'static str, Access)] = &[("ctr", RW), ("ctl", RW), ("args", RW)];
+    let pipes = vec![
+        mk("tick.wgsl", "start", tick_binds)?,
+        mk("tick.wgsl", "finish", tick_binds)?,
+        mk(
+            "rain.wgsl",
+            "main",
+            &[
+                ("occ", RW),
+                ("seen_next", RW),
+                ("cell", RW),
+                ("stat", RW),
+                ("mem", RW),
+                ("ring", R),
+                ("ctr", RW),
+                ("ctl", R),
+                ("jobs", RW),
+            ],
+        )?,
+        mk(
+            "act.wgsl",
+            "main",
+            &[
+                ("occ", RW),
+                ("seen", R),
+                ("seen_next", RW),
+                ("terrain", R),
+                ("fa", RW),
+                ("fb", RW),
+                ("fc", RW),
+                ("fd", RW),
+                ("cell", RW),
+                ("stat", RW),
+                ("sketch", R),
+                ("mem", RW),
+                ("genome", R),
+                ("ring", RW),
+                ("ctr", RW),
+                ("ctl", R),
+                ("jobs", RW),
+            ],
+        )?,
+        mk(
+            "births.wgsl",
+            "main",
+            &[
+                ("jobs", R),
+                ("genome", RW),
+                ("sketch", RW),
+                ("ctr", RW),
+                ("ctl", R),
+            ],
+        )?,
+        mk(
+            "sweep.wgsl",
+            "main",
+            &[
+                ("terrain", R),
+                ("fa", RW),
+                ("fb", RW),
+                ("fc", RW),
+                ("fd", RW),
+                ("ctr", RW),
+            ],
+        )?,
+    ];
+    let (bake_pipe, bake_group0, _) = build_pipe(
+        gpu,
+        cfg,
+        buffers,
+        elems,
+        frames,
+        "bake.wgsl",
+        "main",
+        &[("cell", RW), ("sketch", R), ("ctr", RW)],
+        Some(bake_layout),
+    )?;
+    let (census_pipe, census_group0, _) = build_pipe(
+        gpu,
+        cfg,
+        buffers,
+        elems,
+        frames,
+        "census.wgsl",
+        "main",
+        &[
+            ("occ", R),
+            ("cell", R),
+            ("stat", R),
+            ("tiles", RW),
+            ("ctr", RW),
+        ],
+        None,
+    )?;
+    Ok(SimPipes {
+        pipes,
+        bake_pipe,
+        bake_group0,
+        census_pipe,
+        census_group0,
+    })
+}
+
+struct SimPipes {
+    pipes: Vec<Pipe>,
+    bake_pipe: wgpu::ComputePipeline,
+    bake_group0: wgpu::BindGroup,
+    census_pipe: wgpu::ComputePipeline,
+    census_group0: wgpu::BindGroup,
+}
+
+type Built = (
+    wgpu::ComputePipeline,
+    wgpu::BindGroup,
+    wgpu::BindGroupLayout,
+);
+
 #[allow(clippy::too_many_arguments)]
 fn build_pipe(
     gpu: &Gpu,
@@ -1010,14 +1198,26 @@ fn build_pipe(
     entry: &str,
     binds: &[(&'static str, Access)],
     group1: Option<&wgpu::BindGroupLayout>,
-) -> Result<
-    (
-        wgpu::ComputePipeline,
-        wgpu::BindGroup,
-        wgpu::BindGroupLayout,
-    ),
-    String,
-> {
+) -> Result<Built, String> {
+    let body = cfg.source(file)?;
+    build_pipe_source(
+        gpu, cfg, buffers, elems, frames, file, &body, entry, binds, group1,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_pipe_source(
+    gpu: &Gpu,
+    cfg: &Config,
+    buffers: &HashMap<&'static str, wgpu::Buffer>,
+    elems: &HashMap<&'static str, &'static str>,
+    frames: &wgpu::Buffer,
+    file: &str,
+    body: &str,
+    entry: &str,
+    binds: &[(&'static str, Access)],
+    group1: Option<&wgpu::BindGroupLayout>,
+) -> Result<Built, String> {
     let device = &gpu.device;
     // A world with two genome buffers binds the second wherever the first is bound.
     let mut expanded: Vec<(&'static str, Access)> = binds.to_vec();
@@ -1065,7 +1265,7 @@ fn build_pipe(
             };
         }
     }
-    let mut body = cfg.source(file)?;
+    let mut body = body.to_string();
     if body.contains("//@BRAIN") {
         let (brain, copy) = cfg.brain_wgsl();
         body = body
@@ -1129,11 +1329,11 @@ impl World {
         let q = &self.gpu.queue;
         q.write_buffer(&self.buffers["ctr"], 4, bytemuck::bytes_of(&(slot + 1)));
         let mut cell = [0u32; CELL_WORDS];
-        cell[0] = e.to_bits();
-        cell[1] = womb.to_bits();
-        cell[10] = p as u32;
-        cell[11] = dir;
-        cell[12] = slot;
+        cell[fields::E] = e.to_bits();
+        cell[fields::WOMB] = womb.to_bits();
+        cell[fields::POS] = p as u32;
+        cell[fields::FLAGS] = dir;
+        cell[fields::CLADE] = slot;
         q.write_buffer(
             &self.buffers["cell"],
             slot as u64 * CELL_BYTES,
@@ -1147,7 +1347,7 @@ impl World {
         assert_eq!(genome.len() as u64, g);
         self.write_genomes(slot as u64, genome);
         q.submit([]);
-        self.gpu.wait();
+        self.wait_gpu();
         slot
     }
 
@@ -1157,7 +1357,7 @@ impl World {
             .queue
             .write_buffer(&self.buffers[name], p * 16, bytemuck::cast_slice(&v));
         self.gpu.queue.submit([]);
-        self.gpu.wait();
+        self.wait_gpu();
     }
 
     pub fn read_vec4s(&self, name: &str) -> Vec<[f32; 4]> {
@@ -1203,6 +1403,14 @@ impl World {
     }
 }
 
+/// How many bytes of buffers a saved world of this shape holds.
+pub fn saved_bytes(size: u64, slots: u64, hidden_rows: u64, shard: u64) -> u64 {
+    saved_layout(size, slots, hidden_rows, shard)
+        .iter()
+        .map(|(_, bytes)| bytes)
+        .sum()
+}
+
 /// A saved world's buffers, in file order, with their sizes.
 fn saved_layout(size: u64, slots: u64, hidden_rows: u64, shard: u64) -> Vec<(&'static str, u64)> {
     let squares = size * size;
@@ -1223,7 +1431,7 @@ fn saved_layout(size: u64, slots: u64, hidden_rows: u64, shard: u64) -> Vec<(&'s
                 "fa" | "fb" | "fc" | "fd" => squares * 16,
                 "cell" => slots * CELL_BYTES,
                 "stat" => slots * STAT_BYTES,
-                "sketch" | "jobs" => slots * 16,
+                "sketch" | "jobs" => slots * SKETCH_BYTES,
                 "mem" => slots * hidden_rows * 16,
                 "genome" => slots.min(shard) * blocks * 16,
                 "genome1" => (slots - shard) * blocks * 16,
@@ -1332,6 +1540,10 @@ impl World {
         let mut rng = (self.cfg.seed as u64) ^ 0x7777_1234;
         'outer: for ty in 0..per_side {
             for tx in 0..per_side {
+                self.progress.store(
+                    ((ty * per_side + tx) * 1000 / (per_side * per_side)) as u32,
+                    Ordering::Relaxed,
+                );
                 let which = ((tx + ty) % sources.len() as u64) as usize;
                 let source = &mut sources[which];
                 for sy in 0..src_size {
@@ -1355,11 +1567,12 @@ impl World {
                         let mut rec: [u32; CELL_WORDS] = bytemuck::pod_read_unaligned(
                             &source.cell[s as usize * cell_bytes..(s as usize + 1) * cell_bytes],
                         );
-                        rec[10] = p as u32;
-                        rec[15] = 0;
+                        rec[fields::POS] = p as u32;
+                        rec[fields::STAMP] = 0;
                         cells.extend_from_slice(bytemuck::cast_slice(&rec));
                         sketches.extend_from_slice(
-                            &source.sketch[s as usize * 16..(s as usize + 1) * 16],
+                            &source.sketch[s as usize * SKETCH_BYTES as usize
+                                ..(s as usize + 1) * SKETCH_BYTES as usize],
                         );
                         let at_mem = mems.len();
                         mems.resize(at_mem + mem_bytes, 0u8);
@@ -1432,7 +1645,7 @@ impl World {
                 bytemuck::cast_slice(&seen),
             );
             q.submit([]);
-            self.gpu.wait();
+            self.wait_gpu();
             at = end;
         }
         let tail = slot as u32;
@@ -1440,7 +1653,7 @@ impl World {
             .queue
             .write_buffer(&self.buffers["ctr"], 4, bytemuck::bytes_of(&tail));
         self.gpu.queue.submit([]);
-        self.gpu.wait();
+        self.wait_gpu();
         Ok(slot - first_slot)
     }
 
@@ -1516,10 +1729,10 @@ impl World {
         let hr = self.cfg.hidden_rows as u64;
         let q = &self.gpu.queue;
         q.write_buffer(&self.buffers["cell"], start * CELL_BYTES, cells);
-        q.write_buffer(&self.buffers["sketch"], start * 16, sketches);
+        q.write_buffer(&self.buffers["sketch"], start * SKETCH_BYTES, sketches);
         q.write_buffer(&self.buffers["mem"], start * hr * 16, mems);
         self.write_genomes(start, genomes);
         q.submit([]);
-        self.gpu.wait();
+        self.wait_gpu();
     }
 }

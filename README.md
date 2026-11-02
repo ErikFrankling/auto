@@ -27,6 +27,9 @@ speed, the wheel zooms, `r` reseeds. The browser build needs WebGPU. On Linux it
 to be switched on: `dom.webgpu.enabled` in Firefox, or `--enable-unsafe-webgpu
 --enable-features=Vulkan --use-webgpu-adapter=vulkan` for Chrome.
 
+`./life` opens the artificial life program, building it first if anything changed.
+It starts on an evolved world if one is in `/tmp/lg/saves`, otherwise a new one.
+
 ## How the code is laid out
 
 | Crate | What it does |
@@ -36,6 +39,8 @@ to be switched on: `dom.webgpu.enabled` in Firefox, or `--enable-unsafe-webgpu
 | `auto-cpu` | Life on the CPU (scalar, AVX2, AVX-512) and Hashlife. |
 | `auto-cli` | `bench`, `record`, `cpu`, `list`, `probe`. |
 | `auto-app` | The live viewer, shared by the window and the browser. |
+| `auto-life-gpu` | The artificial life world: one cell per square, one small brain per cell. The `life` binary runs it headless. |
+| `auto-life-app` | A window onto a life world: pan, zoom, every physics setting, every colouring, inspect any cell. Start it with `./life`. |
 | `auto-web` | Browser entry points and the page. |
 | `auto-vk` | The same programs through hand-written Vulkan, to measure what wgpu costs. |
 
