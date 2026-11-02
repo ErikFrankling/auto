@@ -3,7 +3,7 @@
 
 use serde_json::{Value, json};
 
-use crate::config::{CELL_BYTES, STAT_BYTES};
+use crate::config::{CELL_BYTES, SKETCH_BYTES, STAT_BYTES, cell, stat};
 use crate::world::World;
 
 pub const ACTIONS: [&str; 12] = [
@@ -16,6 +16,9 @@ pub struct Sample {
     pub e: f32,
     pub womb: f32,
     pub age: f32,
+    pub hit: f32,
+    pub voice: [f32; 2],
+    pub flags: u32,
     pub pos: u32,
     pub clade: u32,
     pub generation: u32,
@@ -37,6 +40,11 @@ pub struct Samples {
 
 /// Reads scattered runs of slots, enough to hold about `want` live cells.
 pub fn sample(world: &mut World, want: usize) -> Samples {
+    sample_with(world, want, true)
+}
+
+/// The same, optionally without genomes, which are most of the bytes to read.
+pub fn sample_with(world: &mut World, want: usize, with_genomes: bool) -> Samples {
     world.flush();
     let slots = world.cfg.slots as u64;
     let alive = world.alive().max(1) as u64;
@@ -55,9 +63,13 @@ pub fn sample(world: &mut World, want: usize) -> Samples {
     };
     let cell = world.read_ranges("cell", &of(CELL_BYTES));
     let stat = world.read_ranges("stat", &of(STAT_BYTES));
-    let sketch = world.read_ranges("sketch", &of(16));
+    let sketch = world.read_ranges("sketch", &of(SKETCH_BYTES));
     let run_list: Vec<(u64, u64)> = starts.iter().map(|s| (*s, len)).collect();
-    let genome = world.read_genomes(&run_list, genome_bytes);
+    let genome = if with_genomes {
+        world.read_genomes(&run_list, genome_bytes)
+    } else {
+        vec![]
+    };
 
     let mut cells = vec![];
     let mut genomes = vec![];
@@ -66,33 +78,43 @@ pub fn sample(world: &mut World, want: usize) -> Samples {
         let c: &[u8] = &cell[i * CELL_BYTES as usize..(i + 1) * CELL_BYTES as usize];
         let f = |k: usize| f32::from_le_bytes(c[k * 4..k * 4 + 4].try_into().unwrap());
         let u = |k: usize| u32::from_le_bytes(c[k * 4..k * 4 + 4].try_into().unwrap());
-        let (e, age) = (f(0), f(2));
+        let (e, age) = (f(cell::E), f(cell::AGE));
         if e <= 0.0 || age < 1.0 {
             continue;
         }
         let st: &[f32] =
             bytemuck::cast_slice(&stat[i * STAT_BYTES as usize..(i + 1) * STAT_BYTES as usize]);
         let mut sk = [0.0f32; 16];
-        for (k, v) in sketch[i * 16..(i + 1) * 16].iter().enumerate() {
+        for (k, v) in sketch[i * SKETCH_BYTES as usize..(i + 1) * SKETCH_BYTES as usize]
+            .iter()
+            .enumerate()
+        {
             sk[k] = (*v as i8) as f32 / 127.0 * SKETCH_RANGE;
         }
-        let g = &genome[i * genome_bytes as usize..(i + 1) * genome_bytes as usize];
         let genome_at = genomes.len();
-        genomes.extend(g.iter().map(|b| *b as i8));
+        if with_genomes {
+            let g = &genome[i * genome_bytes as usize..(i + 1) * genome_bytes as usize];
+            genomes.extend(g.iter().map(|b| *b as i8));
+        }
         let arr4 = |k: usize| -> [f32; 4] { st[k..k + 4].try_into().unwrap() };
         cells.push(Sample {
             e,
-            womb: f(1),
+            womb: f(cell::WOMB),
             age,
-            pos: u(10),
-            clade: u(12),
-            generation: u(13),
-            x: [f(4), f(5), f(6), f(7)],
-            diet: arr4(0),
-            budget: st[4..16].try_into().unwrap(),
-            chase: arr4(16),
-            follow: arr4(20),
-            misc: arr4(24),
+            hit: f(cell::HIT),
+            voice: [f(cell::VOICE), f(cell::VOICE + 1)],
+            flags: u(cell::FLAGS),
+            pos: u(cell::POS),
+            clade: u(cell::CLADE),
+            generation: u(cell::GEN),
+            x: std::array::from_fn(|k| f(cell::X + k)),
+            diet: arr4(stat::DIET),
+            budget: st[stat::BUDGET..stat::BUDGET + ACTIONS.len()]
+                .try_into()
+                .unwrap(),
+            chase: arr4(stat::CHASE),
+            follow: arr4(stat::FOLLOW),
+            misc: arr4(stat::MISC),
             sketch: sk,
             genome_at,
         });

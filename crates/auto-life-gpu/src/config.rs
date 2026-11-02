@@ -15,6 +15,82 @@ pub const SQUARE_BYTES: u64 = 4 + 4 + 4 + 4 + 16 * 3;
 pub const CELL_BYTES: u64 = 64;
 pub const STAT_BYTES: u64 = 112;
 pub const TILE_ROW_BYTES: u64 = 48;
+/// A genome sketch per slot: four packed words.
+pub const SKETCH_BYTES: u64 = 16;
+
+/// Where each field sits in a `Cell` record, in 32-bit words. Matches `WGSL_STRUCTS` in world.rs.
+/// Everything on the CPU side reads cells through these.
+pub mod cell {
+    pub const WORDS: usize = (super::CELL_BYTES / 4) as usize;
+    pub const E: usize = 0;
+    pub const WOMB: usize = 1;
+    pub const AGE: usize = 2;
+    pub const HIT: usize = 3;
+    pub const X: usize = 4;
+    pub const VOICE: usize = 8;
+    pub const POS: usize = 10;
+    pub const FLAGS: usize = 11;
+    pub const CLADE: usize = 12;
+    pub const GEN: usize = 13;
+    pub const RGB: usize = 14;
+    pub const STAMP: usize = 15;
+
+    // The bits of `FLAGS`, as in common.wgsl.
+    pub const DIR_MASK: u32 = 7;
+    pub const F_MATE: u32 = 8;
+    pub const F_SHARE: u32 = 16;
+    pub const F_MOVED: u32 = 32;
+    pub const F_BIT: u32 = 64;
+    /// What last hurt it: 1 bitten, 2 burned, otherwise starved or old.
+    pub const CAUSE_SHIFT: u32 = 8;
+    pub const CAUSE_MASK: u32 = 3;
+}
+
+/// Where each measurement sits in a `Stat` record, in 32-bit words. Matches `WGSL_STRUCTS` in world.rs.
+pub mod stat {
+    pub const WORDS: usize = (super::STAT_BYTES / 4) as usize;
+    pub const DIET: usize = 0;
+    pub const BUDGET: usize = 4;
+    pub const CHASE: usize = 16;
+    pub const FOLLOW: usize = 20;
+    pub const MISC: usize = 24;
+}
+
+/// Indexes of the shared counters, as in common.wgsl.
+pub mod counter {
+    pub const BIRTHS: usize = 3;
+    pub const STARVED: usize = 5;
+    pub const BITTEN: usize = 6;
+    pub const BURNED: usize = 7;
+    pub const OLD: usize = 8;
+}
+
+/// When a physics setting takes effect.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Scope {
+    /// The running world follows it from the next tick.
+    Live,
+    /// Only read while building a world, so it waits for the next new world.
+    NewWorld,
+    /// No shader reads it.
+    Unused,
+}
+
+/// A saved world's header.
+pub fn read_save_head(path: &str) -> Result<Value, String> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
+    let mut len = [0u8; 8];
+    f.read_exact(&mut len).map_err(|e| format!("{path}: {e}"))?;
+    let len = u64::from_le_bytes(len);
+    if len > 1 << 24 {
+        return Err(format!("{path} isn't a saved world"));
+    }
+    let mut head = vec![0u8; len as usize];
+    f.read_exact(&mut head)
+        .map_err(|e| format!("{path}: {e}"))?;
+    serde_json::from_slice(&head).map_err(|_| format!("{path} isn't a saved world"))
+}
 
 #[derive(Clone)]
 pub struct Config {
@@ -54,6 +130,81 @@ impl Config {
         cfg.shard_slots = cfg.max_shard_slots();
         cfg.slots = cfg.default_slots();
         Ok(cfg)
+    }
+
+    /// The shape and physics a saved world was made with. Keys it doesn't have keep their defaults.
+    pub fn from_save(path: &str, shaders: Option<PathBuf>) -> Result<Config, String> {
+        let head = read_save_head(path)?;
+        let head_len = {
+            use std::io::Read;
+            let mut len = [0u8; 8];
+            std::fs::File::open(path)
+                .and_then(|mut f| f.read_exact(&mut len))
+                .map_err(|e| format!("{path}: {e}"))?;
+            u64::from_le_bytes(len)
+        };
+        let int = |k: &str| head[k].as_u64().map(|v| v as u32);
+        let size = int("size").ok_or_else(|| format!("{path} has no size"))?;
+        let mut cfg = Config::new(size, int("seed").unwrap_or(1), shaders)?;
+        cfg.hidden_rows = int("hidden_rows").unwrap_or(cfg.hidden_rows);
+        cfg.shard_slots = int("shard_slots").unwrap_or_else(|| cfg.max_shard_slots());
+        cfg.slots = int("slots").ok_or_else(|| format!("{path} has no slots"))?;
+        // The buffers' sizes depend on the cell and genome layouts, which change between versions.
+        let body = crate::world::saved_bytes(
+            cfg.size as u64,
+            cfg.slots as u64,
+            cfg.hidden_rows as u64,
+            cfg.shard_slots as u64,
+        );
+        let on_disk = std::fs::metadata(path)
+            .map_err(|e| format!("{path}: {e}"))?
+            .len();
+        if on_disk != 8 + head_len + body {
+            return Err(format!(
+                "{path} was saved by a different version of the simulation, or is cut short"
+            ));
+        }
+        if let Value::Object(saved) = &head["physics"] {
+            for (k, v) in saved {
+                cfg.physics.insert(k.clone(), v.clone());
+            }
+        }
+        Ok(cfg)
+    }
+
+    /// When a setting takes effect, found by reading the shaders, so new settings are right on their own.
+    pub fn scope(&self, key: &str) -> Scope {
+        // The running world takes the sun through its scale, which `World::set_physics` works out.
+        if key == "sun" {
+            return Scope::Live;
+        }
+        let name = key.to_uppercase();
+        let names: Vec<String> = if key == "rock" {
+            vec!["ROCK_ON".into(), "ROCK_ON_F".into()]
+        } else if let Some(stem) = key.strip_suffix("_decay") {
+            vec![name.clone(), format!("{}_DECAY_KEEP", stem.to_uppercase())]
+        } else {
+            vec![name.clone(), format!("{name}_F")]
+        };
+        let used_in = |file: &str| {
+            let text = self.source(file).unwrap_or_default();
+            names.iter().any(|n| has_word(&text, n))
+        };
+        const RUNNING: [&str; 6] = [
+            "common.wgsl",
+            "act.wgsl",
+            "births.wgsl",
+            "rain.wgsl",
+            "sweep.wgsl",
+            "tick.wgsl",
+        ];
+        if RUNNING.iter().any(|f| used_in(f)) {
+            Scope::Live
+        } else if used_in("terrain.wgsl") {
+            Scope::NewWorld
+        } else {
+            Scope::Unused
+        }
     }
 
     pub fn blocks(&self) -> u32 {
@@ -210,6 +361,14 @@ impl Config {
         }
         (s, copy)
     }
+}
+
+fn has_word(text: &str, word: &str) -> bool {
+    let is_name = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    text.match_indices(word).any(|(at, _)| {
+        !text[..at].chars().next_back().is_some_and(is_name)
+            && !text[at + word.len()..].chars().next().is_some_and(is_name)
+    })
 }
 
 fn read_source(dir: &Option<PathBuf>, file: &str) -> Result<String, String> {
