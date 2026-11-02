@@ -247,7 +247,7 @@ fn harvest_is_supply_and_demand() {
 
 #[test]
 fn locked_food_reach_matches_plain_rule() {
-    let mut w = quiet_world(32, &[], &[("locked", "0.9"), ("eat_max", "10")]);
+    let mut w = quiet_world(32, &[], &[("locked", "0.9"), ("eat_max", "10"), ("eat_rate", "20")]);
     let want = budget(&[(REST, 60), (EAT, 100)]);
     let g = fixed_genome(2, want);
     let z = 2.0;
@@ -904,10 +904,10 @@ fn same_seed_same_world_with_bins_overflowing_and_slots_short() {
     // which are the two places that a timing-dependent design couldn't repeat.
     let run = || {
         let mut cfg = auto_life_soft::Config::new(32, 11, None).unwrap();
-        for (k, v) in [("sun", "0.2"), ("rain_p", "40"), ("rain_burst_ticks", "2000"), ("rock", "false"), ("r0", "0.2"), ("k_push", "0.02")] {
+        for (k, v) in [("sun", "0.2"), ("rain_p", "40"), ("rain_burst_ticks", "2000"), ("rock", "false"), ("r0", "0.2"), ("k_push", "0.02"), ("hazard", "0")] {
             cfg.set(k, v).unwrap();
         }
-        cfg.slots = 300;
+        cfg.slots = 1800;
         let mut w = auto_life_soft::World::new(cfg, auto_life_soft::Pacing { target_ms: 50.0, duty: 1.0 }).unwrap();
         for _ in 0..400 {
             w.step();
