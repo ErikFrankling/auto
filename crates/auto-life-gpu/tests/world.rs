@@ -430,3 +430,71 @@ fn a_new_cell_starts_with_blank_measurements() {
         "child carries the old owner's numbers"
     );
 }
+
+#[test]
+fn batch_worlds_stay_apart() {
+    const TILE: usize = 64;
+    const WALL: usize = 5;
+    const SIZE: usize = 128;
+    let tile_of = |p: usize| (p / SIZE) / TILE * 2 + (p % SIZE) / TILE;
+    let mut w = world_with(SIZE as u32, 3, &[("batch_tile", "64"), ("batch_wall", "5")]);
+    let terrain = w.read_u32s("terrain");
+    for (p, t) in terrain.iter().enumerate() {
+        let (x, y) = ((p % SIZE) % TILE, (p / SIZE) % TILE);
+        if x < WALL || y < WALL {
+            assert_ne!(t & (1 << 24), 0, "no wall at square {p}");
+        }
+    }
+    // Each world gets its own land, not a copy of its neighbour's.
+    let sun = |tile: usize| -> Vec<u32> {
+        let (ox, oy) = (tile % 2 * TILE, tile / 2 * TILE);
+        (WALL..TILE).flat_map(|y| (WALL..TILE).map(move |x| (oy + y) * SIZE + ox + x)).map(|p| terrain[p] & 0xFFFF).collect()
+    };
+    assert_ne!(sun(0), sun(1));
+    assert_ne!(sun(0), sun(2));
+
+    for _ in 0..800 {
+        w.step();
+    }
+    w.flush();
+
+    // A line of descent starts from one landing in one world, so seeing it in two means a leak.
+    let occ = w.read_u32s("occ");
+    let cells = w.read_cells();
+    let mut home = std::collections::HashMap::new();
+    let mut worlds_alive = std::collections::HashSet::new();
+    for (p, o) in occ.iter().enumerate() {
+        if *o != 0 && *o != ROCK {
+            let (x, y) = ((p % SIZE) % TILE, (p / SIZE) % TILE);
+            assert!(x >= WALL && y >= WALL, "a cell stands in the wall at square {p}");
+            let clade = cells[*o as usize - 1][12];
+            let tile = tile_of(p);
+            worlds_alive.insert(tile);
+            assert_eq!(*home.entry(clade).or_insert(tile), tile, "line {clade} is in two worlds");
+        }
+    }
+    assert!(worlds_alive.len() >= 3, "only worlds {worlds_alive:?} have life");
+
+    // Nothing that spreads gets inside the wall either.
+    for field in ["fa", "fb", "fc", "fd"] {
+        let values = w.read_u32s(field);
+        for p in 0..SIZE * SIZE {
+            let (x, y) = ((p % SIZE) % TILE, (p / SIZE) % TILE);
+            if x >= 1 && x + 1 < WALL && y >= WALL {
+                assert!(values[p * 4..p * 4 + 4].iter().all(|v| *v == 0), "{field} got into the wall at {p}");
+            }
+        }
+    }
+
+    // One world can be taken out of the batch to seed another.
+    let path = std::env::temp_dir().join(format!("life-batch-{}.bin", std::process::id()));
+    let path = path.to_str().unwrap().to_string();
+    w.save(&path).unwrap();
+    let in_tile_1 = occ.iter().enumerate().filter(|(p, o)| **o != 0 && **o != ROCK && tile_of(*p) == 1).count() as u64;
+    let mut single = world_with(TILE as u32, 4, &[("rock", "false"), ("rain_p", "0"), ("rain_burst_ticks", "0")]);
+    let before = single.alive() as u64;
+    let planted = single.seed_from(&[format!("{path}@64:1")], 1.0).unwrap();
+    assert_eq!(planted, in_tile_1);
+    assert_eq!(single.alive() as u64, before + planted);
+    let _ = std::fs::remove_file(&path);
+}

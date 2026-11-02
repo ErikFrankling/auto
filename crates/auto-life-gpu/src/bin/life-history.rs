@@ -1,6 +1,8 @@
 //! Follows a run through time from its dumps: which strategies and species exist, when they
 //! appear and vanish, and whether anything keeps changing. Runs on the CPU, with no GPU.
-//!   life-history NAME DUMP_DIR OUT.json
+//!   life-history NAME DUMP_DIR OUT.json [--tile SIZE]
+//!
+//! With --tile, the map is a batch of separate worlds, and each gets its own history.
 //!
 //! Strategies come from what brains do in a fixed set of situations, so two genomes that act
 //! alike count as one. Species come from genomes, so the two can be compared. Labels are
@@ -171,7 +173,18 @@ fn battery() -> Vec<Inputs> {
     v
 }
 
-fn read_dump(path: &std::path::Path, tests: &[Inputs]) -> Option<(Dump, usize)> {
+/// A dump as it is on disk, so a batch can turn only one world's cells into brains at a time.
+struct Raw {
+    tick: u64,
+    alive: u64,
+    size: usize,
+    hr: usize,
+    map: Vec<u8>,
+    rec: usize,
+    recs: Vec<u8>,
+}
+
+fn read_raw(path: &std::path::Path) -> Option<Raw> {
     let mut f = std::fs::File::open(path).ok()?;
     let mut len = [0u8; 8];
     f.read_exact(&mut len).ok()?;
@@ -183,46 +196,82 @@ fn read_dump(path: &std::path::Path, tests: &[Inputs]) -> Option<(Dump, usize)> 
         std::process::exit(2);
     }
     let on = |k: &str| head["physics"][k].as_bool().unwrap_or(false);
-    let rule_actions = [on("armour_on"), on("waste_on") && on("waste_clean")];
-    let _ = RULE_ACTIONS.set(rule_actions);
+    let _ = RULE_ACTIONS.set([on("armour_on"), on("waste_on") && on("waste_clean")]);
     let size = head["size"].as_u64()? as usize;
     let count = head["count"].as_u64()? as usize;
     let gb = head["genome_bytes"].as_u64()? as usize;
     let hr = head["hidden_rows"].as_u64()? as usize;
     let mut map = vec![0u8; size * size / 8 + 1];
     f.read_exact(&mut map).ok()?;
-    let mut cells = Vec::with_capacity(count);
-    let mut rec = vec![0u8; CELL_BYTES + STAT_BYTES + gb];
-    for _ in 0..count {
-        f.read_exact(&mut rec).ok()?;
-        let u: &[u32] = &bytemuck::pod_collect_to_vec::<u8, u32>(&rec[..CELL_BYTES]);
-        let st: Vec<f32> = bytemuck::pod_collect_to_vec::<u8, f32>(&rec[CELL_BYTES..CELL_BYTES + STAT_BYTES]);
-        let genome: Vec<f32> = rec[CELL_BYTES + STAT_BYTES..].iter().map(|b| (*b as i8 as f32 / 127.0).max(-1.0)).collect();
-        let mut print = Vec::with_capacity(tests.len() * 12);
-        for t in tests {
-            let shares = act(&genome, hr, t).0;
-            print.extend_from_slice(&shares[..10]);
-            // Only actions that exist count, so a rule that's off doesn't change the measure.
-            for k in 0..2 {
-                if rule_actions[k] {
-                    print.push(shares[10 + k]);
+    let rec = CELL_BYTES + STAT_BYTES + gb;
+    let mut recs = vec![0u8; count * rec];
+    f.read_exact(&mut recs).ok()?;
+    Some(Raw { tick: head["tick"].as_u64()?, alive: head["alive"].as_u64()?, size, hr, map, rec, recs })
+}
+
+fn cell_of(rec: &[u8], hr: usize, tests: &[Inputs]) -> Cell {
+    let rule_actions = RULE_ACTIONS.get().copied().unwrap_or([false; 2]);
+    let u: &[u32] = &bytemuck::pod_collect_to_vec::<u8, u32>(&rec[..CELL_BYTES]);
+    let st: Vec<f32> = bytemuck::pod_collect_to_vec::<u8, f32>(&rec[CELL_BYTES..CELL_BYTES + STAT_BYTES]);
+    let genome: Vec<f32> = rec[CELL_BYTES + STAT_BYTES..].iter().map(|b| (*b as i8 as f32 / 127.0).max(-1.0)).collect();
+    let mut print = Vec::with_capacity(tests.len() * 12);
+    for t in tests {
+        let shares = act(&genome, hr, t).0;
+        print.extend_from_slice(&shares[..10]);
+        // Only actions that exist count, so a rule that's off doesn't change the measure.
+        for k in 0..2 {
+            if rule_actions[k] {
+                print.push(shares[10 + k]);
+            }
+        }
+    }
+    Cell {
+        diet: st[0..4].try_into().unwrap(),
+        budget: st[4..16].try_into().unwrap(),
+        moving: st[19],
+        crowd: st[24] * 8.0,
+        age: f32::from_bits(u[2]),
+        energy: f32::from_bits(u[0]),
+        generation: u[13] as f32,
+        clade: u[12],
+        genome,
+        print,
+    }
+}
+
+impl Raw {
+    /// The whole map as one world.
+    fn whole(&self, tests: &[Inputs]) -> Dump {
+        let cells = self.recs.chunks_exact(self.rec).map(|r| cell_of(r, self.hr, tests)).collect();
+        Dump { tick: self.tick, alive: self.alive, map: self.map.clone(), cells }
+    }
+
+    /// One world of a batch, with its own map and only its own cells.
+    fn tile(&self, tile: usize, index: usize, tests: &[Inputs]) -> Dump {
+        let per_side = self.size / tile;
+        let (ox, oy) = (index % per_side * tile, index / per_side * tile);
+        let mut map = vec![0u8; tile * tile / 8 + 1];
+        let mut alive = 0u64;
+        for y in 0..tile {
+            for x in 0..tile {
+                let p = (oy + y) * self.size + ox + x;
+                if self.map[p / 8] & (1 << (p % 8)) != 0 {
+                    let q = y * tile + x;
+                    map[q / 8] |= 1 << (q % 8);
+                    alive += 1;
                 }
             }
         }
-        cells.push(Cell {
-            diet: st[0..4].try_into().unwrap(),
-            budget: st[4..16].try_into().unwrap(),
-            moving: st[19],
-            crowd: st[24] * 8.0,
-            age: f32::from_bits(u[2]),
-            energy: f32::from_bits(u[0]),
-            generation: u[13] as f32,
-            clade: u[12],
-            genome,
-            print,
-        });
+        let mut cells = vec![];
+        for r in self.recs.chunks_exact(self.rec) {
+            let pos = u32::from_le_bytes(r[40..44].try_into().unwrap()) as usize;
+            let (x, y) = (pos % self.size, pos / self.size);
+            if x >= ox && x < ox + tile && y >= oy && y < oy + tile {
+                cells.push(cell_of(r, self.hr, tests));
+            }
+        }
+        Dump { tick: self.tick, alive, map, cells }
     }
-    Some((Dump { tick: head["tick"].as_u64()?, alive: head["alive"].as_u64()?, map, cells }, hr))
 }
 
 fn dist2(a: &[f32], b: &[f32]) -> f32 {
@@ -379,22 +428,55 @@ fn label(diet: &[f32; 4], moving: f32, budget: &[f32; 12]) -> String {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 4 {
-        eprintln!("usage: life-history NAME DUMP_DIR OUT.json");
+        eprintln!("usage: life-history NAME DUMP_DIR OUT.json [--tile SIZE]");
         std::process::exit(2);
     }
     let tests = battery();
     let mut paths: Vec<_> = std::fs::read_dir(&args[2]).unwrap().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "bin")).collect();
     paths.sort();
-    let mut dumps = vec![];
-    let mut hr = 2;
-    for p in &paths {
-        if let Some((d, h)) = read_dump(p, &tests) {
-            hr = h;
-            dumps.push(d);
+    let raws: Vec<Raw> = paths.iter().filter_map(|p| read_raw(p)).collect();
+    let tile = args.iter().position(|a| a == "--tile").map(|i| args[i + 1].parse::<usize>().expect("--tile SIZE"));
+    let out = match (tile, raws.first()) {
+        (Some(tile), Some(first)) => {
+            let per_side = first.size / tile;
+            let count = per_side * per_side;
+            let next = std::sync::atomic::AtomicUsize::new(0);
+            let done = std::sync::Mutex::new(vec![Value::Null; count]);
+            std::thread::scope(|scope| {
+                for _ in 0..3 {
+                    scope.spawn(|| loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if i >= count {
+                            break;
+                        }
+                        let dumps: Vec<Dump> = raws.iter().map(|r| r.tile(tile, i, &tests)).collect();
+                        let mut v = analyse(&format!("{}-t{i:03}", args[1]), &dumps);
+                        v["tile"] = json!(i);
+                        done.lock().unwrap()[i] = v;
+                    });
+                }
+            });
+            json!({"name": args[1], "batch_tile": tile, "tiles": done.into_inner().unwrap()})
         }
+        _ => {
+            let dumps: Vec<Dump> = raws.iter().map(|r| r.whole(&tests)).collect();
+            eprintln!("{} dumps, {} cells", dumps.len(), dumps.iter().map(|d| d.cells.len()).sum::<usize>());
+            analyse(&args[1], &dumps)
+        }
+    };
+    std::fs::write(&args[3], serde_json::to_string(&out).unwrap()).unwrap();
+}
+
+fn analyse(name: &str, dumps: &[Dump]) -> Value {
+    // Nothing to sort into strategies: say what's known, which is a result too.
+    if dumps.iter().map(|d| d.cells.len()).sum::<usize>() < 50 {
+        return json!({
+            "name": name,
+            "dead": true,
+            "ticks": dumps.iter().map(|d| d.tick).collect::<Vec<u64>>(),
+            "alive": dumps.iter().map(|d| d.alive).collect::<Vec<u64>>(),
+        });
     }
-    let _ = hr;
-    eprintln!("{} dumps, {} cells", dumps.len(), dumps.iter().map(|d| d.cells.len()).sum::<usize>());
     let mut rng = Rng(11);
 
     // Strategies: one set across the whole run, so a strategy keeps its identity through time.
@@ -690,8 +772,30 @@ fn main() {
     let gens: Vec<f32> = dumps.iter().map(|d| d.cells.iter().map(|c| c.generation).sum::<f32>() / d.cells.len().max(1) as f32).collect();
     let ages: Vec<f32> = dumps.iter().map(|d| d.cells.iter().map(|c| c.age).sum::<f32>() / d.cells.len().max(1) as f32).collect();
     let energies: Vec<f32> = dumps.iter().map(|d| d.cells.iter().map(|c| c.energy).sum::<f32>() / d.cells.len().max(1) as f32).collect();
+    // What the population lives on, and how much of its behaviour its species explain.
+    let mean_of = |d: &Dump, f: &dyn Fn(&Cell) -> f32| d.cells.iter().map(f).sum::<f32>() / d.cells.len().max(1) as f32;
+    let others = |c: &Cell| {
+        let t: f32 = c.diet.iter().sum::<f32>().max(1e-6);
+        (c.diet[1] + c.diet[2]) / t
+    };
+    let bites = |c: &Cell| {
+        let t: f32 = c.diet.iter().sum::<f32>().max(1e-6);
+        c.diet[2] / t
+    };
+    let gifts = |c: &Cell| {
+        let t: f32 = c.diet.iter().sum::<f32>().max(1e-6);
+        c.diet[3] / t
+    };
+    let series = |f: &dyn Fn(&Cell) -> f32| -> Vec<f32> { dumps.iter().map(|d| (mean_of(d, f) * 1000.0).round() / 1000.0).collect() };
+    let explained: Vec<f32> = dumps.iter().map(|d| species_explain(d, &reduce, join_gap)).collect();
     let out = json!({
-        "name": args[1],
+        "name": name,
+        "from_others": series(&others),
+        "bite": series(&bites),
+        "gift": series(&gifts),
+        "moving": series(&|c: &Cell| c.moving),
+        "rest": series(&|c: &Cell| c.budget[0]),
+        "species_explain": explained,
         "ticks": ticks,
         "alive": dumps.iter().map(|d| d.alive).collect::<Vec<u64>>(),
         "strategy_scores": scores,
@@ -710,5 +814,76 @@ fn main() {
         "age": ages,
         "energy": energies,
     });
-    std::fs::write(&args[3], serde_json::to_string(&out).unwrap()).unwrap();
+    out
+}
+
+/// Share of the differences in behaviour that lie between species rather than within them,
+/// corrected for the share that groups this small would get by chance.
+fn species_explain(d: &Dump, reduce: &dyn Fn(&[f32]) -> Vec<f32>, join_gap: f32) -> f32 {
+    if d.cells.len() < 20 {
+        return 0.0;
+    }
+    let step = (d.cells.len() / 800).max(1);
+    let idx: Vec<usize> = (0..d.cells.len()).step_by(step).collect();
+    let dims = d.cells[0].genome.len() as f32;
+    let mut groups: Vec<(Vec<f32>, Vec<usize>)> = vec![];
+    for &c in &idx {
+        let g = &d.cells[c].genome;
+        let mut found = None;
+        let mut bd = join_gap;
+        for (gi, (centre, _)) in groups.iter().enumerate() {
+            let v = (dist2(g, centre) / dims).sqrt() * 2.0;
+            if v < bd {
+                bd = v;
+                found = Some(gi);
+            }
+        }
+        match found {
+            Some(gi) => {
+                let (centre, members) = &mut groups[gi];
+                members.push(c);
+                let n = members.len() as f32;
+                for (x, y) in centre.iter_mut().zip(g) {
+                    *x += (y - *x) / n;
+                }
+            }
+            None => groups.push((g.clone(), vec![c])),
+        }
+    }
+    // Groups under 1% are noise here, as everywhere else in this file.
+    let least = (idx.len() as f32 * 0.01).ceil() as usize;
+    let big: Vec<&(Vec<f32>, Vec<usize>)> = groups.iter().filter(|g| g.1.len() >= least.max(2)).collect();
+    if big.len() < 2 {
+        return 0.0;
+    }
+    let points: Vec<Vec<Vec<f32>>> = big.iter().map(|g| g.1.iter().map(|c| reduce(&d.cells[*c].print)).collect()).collect();
+    let all: Vec<&Vec<f32>> = points.iter().flatten().collect();
+    let n = all.len() as f32;
+    let width = all[0].len();
+    let mut mean = vec![0.0f32; width];
+    for p in &all {
+        for i in 0..width {
+            mean[i] += p[i] / n;
+        }
+    }
+    let total: f32 = all.iter().map(|p| dist2(p, &mean)).sum();
+    let mut within = 0.0f32;
+    for g in &points {
+        let m = g.len() as f32;
+        let mut centre = vec![0.0f32; width];
+        for p in g {
+            for i in 0..width {
+                centre[i] += p[i] / m;
+            }
+        }
+        within += g.iter().map(|p| dist2(p, &centre)).sum::<f32>();
+    }
+    let k = points.len() as f32;
+    if total <= 0.0 || n <= k {
+        return 0.0;
+    }
+    let between = total - within;
+    let within_mean = within / (n - k);
+    let omega = (between - (k - 1.0) * within_mean) / (total + within_mean);
+    (omega.max(0.0) * 1000.0).round() / 1000.0
 }

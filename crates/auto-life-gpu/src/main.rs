@@ -94,6 +94,9 @@ struct Args {
     dump_every: u64,
     #[arg(long)]
     dump_dir: Option<String>,
+    /// How many cells each dump samples. A batch of worlds needs some for each.
+    #[arg(long, default_value_t = 2500)]
+    dump_cells: usize,
 }
 
 fn main() {
@@ -183,6 +186,29 @@ fn run(args: Args) -> Result<(), String> {
     writeln!(log, "{}", json!({"config": world.cfg.physics, "size": args.size, "slots": world.cfg.slots, "seed": args.seed, "hidden_rows": args.hidden_rows, "open": world.open}))
         .map_err(|e| e.to_string())?;
 
+    // A batch keeps many worlds on one map. Their land differs, so note what each one got.
+    let tile = world.cfg.f("batch_tile") as usize;
+    if tile > 0 {
+        let terrain = world.read_u32s("terrain");
+        let size = args.size as usize;
+        let per_side = size / tile;
+        let mut tiles = vec![];
+        for i in 0..per_side * per_side {
+            let (ox, oy) = (i % per_side * tile, i / per_side * tile);
+            let (mut open, mut sun) = (0u64, 0.0f64);
+            for y in oy..oy + tile {
+                for v in &terrain[y * size + ox..y * size + ox + tile] {
+                    if v & (1 << 24) == 0 {
+                        open += 1;
+                        sun += (v & 0xFFFF) as f64 / 65535.0;
+                    }
+                }
+            }
+            tiles.push(json!({"tile": i, "open": open, "sun": sun / open.max(1) as f64 * auto_life_gpu::config::SUN_RANGE as f64 * world.sun_k as f64}));
+        }
+        writeln!(log, "{}", json!({"tiles": tiles, "batch_tile": tile})).map_err(|e| e.to_string())?;
+    }
+
     let layout = match args.view.as_str() {
         "genome" => Layout::Genome,
         "diet" => Layout::Diet,
@@ -217,6 +243,7 @@ fn run(args: Args) -> Result<(), String> {
     let started = Instant::now();
     let first = world.tick;
     let (mut last_tick, mut last_gpu, mut last_wall) = (first, 0.0, 0.0);
+    let mut last_submits = world.submits;
     for t in 1..=args.ticks {
         world.step();
         if let Some(rec) = &mut recorder
@@ -231,7 +258,7 @@ fn run(args: Args) -> Result<(), String> {
         {
             let _ = std::fs::create_dir_all(dir);
             let path = format!("{dir}/t{:09}.bin", world.tick);
-            auto_life_gpu::report::dump(&mut world, &path, 2500)?;
+            auto_life_gpu::report::dump(&mut world, &path, args.dump_cells)?;
         }
         if let Some(path) = &args.snapshot
             && args.snapshot_every > 0
@@ -279,10 +306,18 @@ fn run(args: Args) -> Result<(), String> {
             );
             (last_tick, last_gpu, last_wall) = (world.tick, world.gpu_seconds, wall);
             let software = std::env::var("AUTO_ADAPTER").is_ok_and(|a| a.contains("llvmpipe"));
-            if !args.force && !software && world.slow_submits >= 5 {
+            // The clock can't tell this world's work from waiting behind another program on
+            // the GPU. A world that's too big is slow nearly every time, and waiting is rare.
+            let submits = (world.submits - last_submits).max(1);
+            last_submits = world.submits;
+            if !args.force
+                && !software
+                && world.slow_submits >= 5
+                && world.slow_submits as u64 * 50 >= submits as u64
+            {
                 return Err(format!(
-                    "{} submissions held the GPU over 80 ms, the longest {:.0} ms, so the desktop would stutter. Use a smaller world.",
-                    world.slow_submits, world.longest_submit_ms
+                    "{} of {} submissions held the GPU over 80 ms, the longest {:.0} ms, so the desktop would stutter. Use a smaller world.",
+                    world.slow_submits, submits, world.longest_submit_ms
                 ));
             }
             world.longest_submit_ms = 0.0;

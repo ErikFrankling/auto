@@ -5,6 +5,8 @@
   "rock": true,
   "terrain_style": 1,
   "terrain_contrast": 2.4,
+  "batch_tile": 0,
+  "batch_wall": 5,
 
   "rain_p": 0.00125,
   "rain_energy": 6,

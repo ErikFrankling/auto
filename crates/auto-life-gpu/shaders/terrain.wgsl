@@ -2,13 +2,16 @@
 // nest inside regions inside continents, so there are places of every size to
 // live in, and rock ridges cut them apart with gaps to pass through.
 
+// How wide the noise is before it wraps: the whole world, or one world of a batch.
+var<private> span: u32 = 0u;
+
 fn hash2(x: u32, y: u32, seed: u32) -> f32 {
     return unit_f(pcg(pcg(x ^ (seed * 2654435761u)) ^ y));
 }
 
 // Smooth noise that wraps at the world edge. `size` is a power of two.
 fn vnoise(x: u32, y: u32, size: u32, seed: u32) -> f32 {
-    let m = W / size - 1u;
+    let m = span / size - 1u;
     let ix = x / size;
     let iy = y / size;
     let tx0 = f32(x & (size - 1u)) / f32(size);
@@ -22,13 +25,13 @@ fn vnoise(x: u32, y: u32, size: u32, seed: u32) -> f32 {
     return mix(mix(a, b, tx), mix(c, d, tx), ty);
 }
 
-fn scale_of(want: u32) -> u32 { return min(want, W / 2u); }
+fn scale_of(want: u32) -> u32 { return min(want, span / 2u); }
 
 // The same noise at any point, not just on squares, so coordinates can be bent.
 fn fnoise(x: f32, y: f32, size: u32, seed: u32) -> f32 {
-    let m = W / size - 1u;
+    let m = span / size - 1u;
     let fs = f32(size);
-    let w = f32(W);
+    let w = f32(span);
     let px = x - floor(x / w) * w;
     let py = y - floor(y / w) * w;
     let ix = u32(px / fs);
@@ -62,7 +65,7 @@ fn scale_free_sun(x: f32, y: f32, seed: u32) -> f32 {
     var weight = 0.45;
     var k = 0u;
     loop {
-        if (size > W / 2u) { break; }
+        if (size > span / 2u) { break; }
         sum += (bent(x, y, size, seed ^ (300u + k * 7u)) * 2.0 - 1.0) * weight;
         total += weight * weight;
         weight *= 1.3;
@@ -77,10 +80,10 @@ fn scale_free_rock(x: f32, y: f32, seed: u32) -> bool {
     var size = 16u;
     var k = 0u;
     loop {
-        if (size > W / 2u) { break; }
+        if (size > span / 2u) { break; }
         // Thin at every size, and only in some places, so regions vary from open to walled in.
         let ridge = bent(x, y, size, seed ^ (400u + k * 11u));
-        let where_ = bent(x, y, min(size * 4u, W / 2u), seed ^ (500u + k * 13u));
+        let where_ = bent(x, y, min(size * 4u, span / 2u), seed ^ (500u + k * 13u));
         let width = 0.008 + 0.05 * where_ * where_ * where_ * where_;
         let gap = fnoise(x, y, max(size / 2u, 8u), seed ^ (600u + k * 17u));
         if (abs(ridge - 0.5) < width && gap > 0.35 && where_ > 0.45) {
@@ -94,11 +97,25 @@ fn scale_free_rock(x: f32, y: f32, seed: u32) -> bool {
 
 @compute @workgroup_size(64, 1)
 fn main(@builtin(global_invocation_id) id: vec3u) {
-    let x = id.x;
-    let y = id.y + F.row0;
-    if (x >= W) { return; }
-    let p = (y << LOG_W) | x;
-    let seed = F.seed;
+    let world_x = id.x;
+    let world_y = id.y + F.row0;
+    if (world_x >= W) { return; }
+    let p = (world_y << LOG_W) | world_x;
+    // A batch: many separate worlds on one map, each with its own land, with rock between
+    // them thicker than anything can sense or reach across.
+    var x = world_x;
+    var y = world_y;
+    var seed = F.seed;
+    var between = false;
+    let tile = max(u32(BATCH_TILE), 1u);
+    span = W;
+    if (BATCH_TILE > 0.0) {
+        span = tile;
+        x = world_x & (tile - 1u);
+        y = world_y & (tile - 1u);
+        seed = pcg(seed ^ ((world_y / tile) * 65536u + world_x / tile + 1u));
+        between = x < u32(BATCH_WALL) || y < u32(BATCH_WALL);
+    }
     let new_style = TERRAIN_STYLE >= 1.0;
     let fx = f32(x);
     let fy = f32(y);
@@ -129,7 +146,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     var place = 0u;
     if (BIOMES_ON || WALLS_ON) {
         // Rooms with wandering edges. The wander is gentle enough that a wall never thins to nothing.
-        let room_w = W / 4u;
+        let room_w = span / 4u;
         let wander = scale_of(room_w / 2u);
         let u = f32(x) / f32(room_w) + 0.2 * (vnoise(x, y, wander, seed ^ 61u) - 0.5);
         let v = f32(y) / f32(room_w) + 0.2 * (vnoise(x, y, wander, seed ^ 62u) - 0.5);
@@ -153,6 +170,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
             }
         }
     }
+    if (between) { rock = true; }
     if (BIOMES_ON) { base *= SUNX_V[place]; }
     var t = u32(clamp(base / SUN_RANGE, 0.0, 1.0) * 65535.0) | (phase << 16u) | (biome << 28u);
     if (rock) { t |= T_ROCK; }

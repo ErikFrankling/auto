@@ -2,10 +2,14 @@
 """The screen: many small worlds, each with its own seed and physics, measured the same way.
 
   life_screen.py queue NAME COUNT [--size 256] [--ticks 120000] [--controls N] [--priority PREFIX] [--rule-chance 0.3]
+  life_screen.py batch NAME COUNT [--size 1024] [--tile 256] [--ticks 120000] [--minutes 20] [--controls N] [--priority PREFIX] [--rule-chance 0.3]
   life_screen.py analyse     keeps measuring finished runs until none are left to wait for
   life_screen.py rank        prints the worlds that stand out
 
 Runs are small on purpose, so hundreds fit. What holds up here gets scaled up.
+A batch puts many separate worlds on one map, walled off from each other, with one set of
+physics and each world its own land. The GPU does far more per cell on a big map, so this
+is what makes hundreds of worlds affordable.
 Every physics setting is sampled around its default, and each rule in research/life-gpu/RULES.md
 is on by chance, with its settings sampled too. Nothing here feeds into a world.
 """
@@ -23,9 +27,9 @@ ROOT = Path(__file__).resolve().parent.parent
 RUNS = Path("/tmp/lg/screen")
 OUT = ROOT / "research/life-gpu/screen"
 SPOOL = Path("/tmp/life-spool")
-BIN = "/tmp/life-stable/direct"
-ANALYSE = "/tmp/life-target/release/life-analyse"
-HISTORY = "/tmp/life-target/release/life-history"
+BIN = os.environ.get("LIFE_BIN", "/tmp/life-batch/direct")
+ANALYSE = os.environ.get("LIFE_ANALYSE", "/tmp/life-batch/life-analyse")
+HISTORY = os.environ.get("LIFE_HISTORY", "/tmp/life-batch/life-history")
 
 # Settings worth varying, as (low, high, log scale). Switches are chosen by chance.
 RANGES = {
@@ -182,6 +186,34 @@ def queue(name, count, size, ticks, controls, priority, rule_chance=0.3):
     print(f"queued {count + controls} runs as {name}")
 
 
+def batch(name, count, size, tile, ticks, minutes, controls, priority, rule_chance=0.3):
+    RUNS.mkdir(parents=True, exist_ok=True)
+    shaders = RUNS / f"shaders-{name}"
+    if not shaders.exists():
+        shutil.copytree(ROOT / "crates/auto-life-gpu/shaders", shaders)
+    rng = random.Random(sum(map(ord, name)) * 7919)
+    worlds = (size // tile) ** 2
+    for i in range(count + controls):
+        run = f"{name}-{i:04d}"
+        d = RUNS / run
+        d.mkdir(parents=True, exist_ok=True)
+        seed = rng.randrange(1, 2**31)
+        physics = {} if i < controls else sample(rng, rng.randint(1, 6), rule_chance, tile)
+        (d / "spec.json").write_text(json.dumps({"run": run, "seed": seed, "size": size, "tile": tile, "ticks": ticks, "physics": physics}))
+        sets = set_flags({**physics, "batch_tile": tile})
+        # Enough cells per world to tell its strategies apart. Dumps are capped by what they read.
+        cmd = (
+            f"{BIN} --shaders {shaders} --size {size} --seed {seed} {sets} --ticks {ticks} --log-every {ticks // 8} --max-minutes {minutes}"
+            f" --out {d}/log.jsonl --dump-every {ticks // 8} --dump-dir {d}/dumps --dump-cells {worlds * 800} --save {d}/world.bin"
+        )
+        job = f"{priority}-{run}"
+        tmp = SPOOL / "jobs" / f".{job}"
+        tmp.write_text(f"cd /tmp\nexport LIFE_MAX_MINUTES={minutes}\nexec {cmd}\n")
+        tmp.rename(SPOOL / "jobs" / job)
+        (SPOOL / "logs" / f"{job}.log").write_text("")
+    print(f"queued {count + controls} batches of {worlds} worlds as {name}")
+
+
 def last_log(path):
     head, last = None, None
     try:
@@ -248,6 +280,84 @@ def features(d):
     return out
 
 
+def time_features(x):
+    shares = [s["share_over_time"] for s in x["strategies"]]
+    return dict(
+        k=x["strategies_k"], silhouette=x["strategies_silhouette"],
+        labels=[s["label"] for s in x["strategies"] if s["peak"] >= 0.05],
+        species_seen=len(x["species"]), events=len(x["events"]),
+        drift=x["behaviour_drift"], overlap=x["map_overlap"],
+        lasting=sum(1 for s in x["strategies"] if sum(1 for v in s["share_over_time"] if v >= 0.05) >= 3),
+        turnover=sum(abs(a - b) for row in shares for a, b in zip(row, row[1:])) / max(len(shares[0]) - 1, 1) / 2 if shares else 0,
+        new_species=x["new_species"], crashes=sum(1 for e in x["events"] if e["kind"] == "population crash"),
+        species_alive=x["species_alive"],
+    )
+
+
+def brain_features(x):
+    b = x["brains"]
+    h = b["whole_population"]["headings"]
+    e = x["economy"]
+    return dict(
+        brain=dict(
+            k=b["strategies_k"], silhouette=b["strategies_silhouette"], dims=b["effective_dims"], reactivity=b["reactivity"],
+            memory=b["memory_effect"], gap=b["behaviour_gap_between_cells"],
+            top=[s["share"] for s in b["strategies"]],
+            food=h["food"]["mean"], bigger=h["bigger body"]["mean"], smaller=h["smaller body"]["mean"],
+            scent=max((h[f"scent {i}"]["mean"] for i in range(4)), key=abs),
+        ),
+        land=dict(colonies=e["colonies"], overlap=e["colony_rich_overlap"]),
+    )
+
+
+def batch_rows(d, spec):
+    """One row per world in a batch. Tiles that came through too thin are rows too."""
+    code = None
+    for f in (SPOOL / "done").glob(f"*-{d.name}"):
+        code = f.read_text().strip()
+    head = None
+    last = None
+    try:
+        for line in open(d / "log.jsonl"):
+            r = json.loads(line)
+            if "tiles" in r:
+                head = r["tiles"]
+            elif "tick" in r:
+                last = r
+    except (OSError, ValueError):
+        pass
+    hist = json.loads((d / "history.json").read_text())["tiles"] if (d / "history.json").exists() else []
+    ana = json.loads((d / "analyse.json").read_text())["tiles"] if (d / "analyse.json").exists() else []
+    rows = []
+    for i in range((spec["size"] // spec["tile"]) ** 2):
+        out = {k: spec[k] for k in ("seed", "size", "tile", "ticks", "physics")}
+        out.update(run=f"{d.name}-t{i:03d}", batch=d.name, index=i, exit=code, tick=last["tick"] if last else 0, tps=last.get("ticks_per_second") if last else None)
+        if head and i < len(head):
+            out.update(open=head[i]["open"], sun=head[i]["sun"])
+        h = hist[i] if i < len(hist) else None
+        if h:
+            out["alive"] = h["alive"]
+            out["cells"] = h["alive"][-1] if h["alive"] else 0
+            if h.get("dead"):
+                out["dead"] = True
+            else:
+                half = len(h["ticks"]) // 2
+                late = lambda k: sum(h[k][half:]) / max(len(h[k][half:]), 1)
+                out.update(
+                    time=time_features(h), from_others=late("from_others"), bite=late("bite"), gift=late("gift"),
+                    moving=late("moving"), rest=late("rest"), explain=late("species_explain"),
+                    species=sum(h["species_alive"][half:]) / max(len(h["species_alive"][half:]), 1),
+                    generation=h["generation"][-1], age=h["age"][-1],
+                )
+        else:
+            out["dead"] = True
+        a = ana[i] if i < len(ana) else None
+        if a and not a.get("dead"):
+            out.update(brain_features(a))
+        rows.append(out)
+    return rows
+
+
 def analyse_once():
     done = 0
     results = OUT / "results.jsonl"
@@ -255,7 +365,8 @@ def analyse_once():
     seen = set()
     if results.exists():
         for line in open(results):
-            seen.add(json.loads(line)["run"])
+            row = json.loads(line)
+            seen.add(row.get("batch") or row["run"])
     for d in sorted(RUNS.iterdir()):
         if not (d / "spec.json").exists() or d.name in seen:
             continue
@@ -263,6 +374,20 @@ def analyse_once():
         if not finished:
             continue
         world = d / "world.bin"
+        spec = json.loads((d / "spec.json").read_text())
+        if spec.get("tile"):
+            more = ["--tile", str(spec["tile"])]
+            if world.exists():
+                subprocess.run(["nice", "-n", "15", ANALYSE, d.name, str(world), str(d / "analyse.json")] + more, capture_output=True)
+            if (d / "dumps").exists():
+                subprocess.run(["nice", "-n", "15", HISTORY, d.name, str(d / "dumps"), str(d / "history.json")] + more, capture_output=True)
+            with open(results, "a") as out:
+                for row in batch_rows(d, spec):
+                    out.write(json.dumps(row) + "\n")
+            # Worlds stay, so a good one can be taken out and scaled up. Dumps have served their purpose.
+            shutil.rmtree(d / "dumps", ignore_errors=True)
+            done += 1
+            continue
         if world.exists():
             subprocess.run(["nice", "-n", "15", ANALYSE, d.name, str(world), str(d / "analyse.json")], capture_output=True)
         if (d / "dumps").exists():
@@ -280,24 +405,48 @@ def analyse_once():
 
 def rank():
     rows = [json.loads(l) for l in open(OUT / "results.jsonl")]
-    live = [r for r in rows if not r.get("dead") and r.get("brain")]
-    def score(r):
+    # A world too thin to have an ecology can't show one, whatever its numbers say.
+    live = [r for r in rows if not r.get("dead") and r.get("brain") and r.get("cells", 0) >= 200]
+    dead = sum(1 for r in rows if r.get("dead"))
+    print(f"{len(rows)} worlds, {len(live)} with enough life to measure, {dead} dead or thin")
+
+    def entropy(r):
+        top = r["brain"]["top"]
+        return math.exp(-sum(p * math.log(p) for p in top if p > 0))
+
+    def late_new(r):
+        new = (r.get("time") or {}).get("new_species") or []
+        return sum(new[len(new) // 2:])
+
+    # No single score: each of these is a different way for a world to be interesting.
+    measures = {
+        "behaviour clusters in use": entropy,
+        "dimensions of behaviour": lambda r: r["brain"]["dims"],
+        "species explain behaviour": lambda r: r.get("explain") or 0,
+        "strategies that last": lambda r: (r.get("time") or {}).get("lasting") or 0,
+        "strategy shares keep shifting": lambda r: (r.get("time") or {}).get("turnover") or 0,
+        "new species late in the run": late_new,
+        "species at once": lambda r: r.get("species") or 0,
+        "lives on other cells": lambda r: r.get("from_others") or 0,
+        "gifts": lambda r: r.get("gift") or 0,
+        "steers by scent": lambda r: abs(r["brain"]["scent"]),
+        "chases smaller bodies": lambda r: r["brain"]["smaller"],
+        "flees bigger bodies": lambda r: -r["brain"]["bigger"],
+    }
+    def line(r):
         b, t = r["brain"], r.get("time") or {}
-        top = b["top"]
-        entropy = -sum(p * math.log(p) for p in top if p > 0)
-        return (
-            math.exp(entropy)
-            + 0.4 * b["dims"]
-            + 3 * max(r.get("explain") or 0, 0)
-            + 0.5 * (t.get("lasting") or 0)
-            + 4 * (t.get("turnover") or 0)
-            + 0.6 * min(r.get("species") or 1, 8)
-        )
-    live.sort(key=score, reverse=True)
-    print(f"{len(rows)} runs, {len(live)} measured, {sum(1 for r in rows if r.get('dead'))} died out")
-    for r in live[:25]:
-        b, t = r["brain"], r.get("time") or {}
-        print(f"{score(r):5.1f} {r['run']:12s} cells {r['cells']:6d} species {r.get('species') or 0:4.1f} k {b['k']} dims {b['dims']:.1f} explain {r.get('explain') or 0:.2f} others {r['from_others'] * 100:3.0f}% move {r['moving'] * 100:3.0f}% {','.join(t.get('labels') or [])[:60]} | {r['physics']}")
+        return f"{r['run']:18s} cells {r.get('cells', 0):6d} species {r.get('species') or 0:4.1f} k {b['k']:2d} dims {b['dims']:.1f} explain {r.get('explain') or 0:.2f} others {(r.get('from_others') or 0) * 100:3.0f}% move {(r.get('moving') or 0) * 100:3.0f}% {','.join(t.get('labels') or [])[:60]}"
+    picked = {}
+    for name, f in measures.items():
+        order = sorted(live, key=f, reverse=True)[:5]
+        print(f"\n{name}")
+        for r in order:
+            print(f"{f(r):8.3f}  {line(r)}")
+            picked[r["run"]] = picked.get(r["run"], 0) + 1
+    print("\ntop on several measures")
+    by = {r["run"]: r for r in live}
+    for run, n in sorted(picked.items(), key=lambda kv: -kv[1])[:15]:
+        print(f"{n:3d}  {line(by[run])} | {by[run]['physics']}")
 
 
 def main():
@@ -307,6 +456,9 @@ def main():
     elif a[0] == "queue":
         opt = lambda n, d: type(d)(a[a.index(n) + 1]) if n in a else d
         queue(a[1], int(a[2]), opt("--size", 256), opt("--ticks", 120000), opt("--controls", 0), opt("--priority", "0-s"), opt("--rule-chance", 0.3))
+    elif a[0] == "batch":
+        opt = lambda n, d: type(d)(a[a.index(n) + 1]) if n in a else d
+        batch(a[1], int(a[2]), opt("--size", 1024), opt("--tile", 256), opt("--ticks", 120000), opt("--minutes", 20), opt("--controls", 0), opt("--priority", "0-b"), opt("--rule-chance", 0.3))
     elif a[0] == "analyse":
         idle = 0
         while idle < 2880:

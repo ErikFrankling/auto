@@ -1081,10 +1081,38 @@ fn brains(w: &mut Save) -> Value {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 4 {
-        eprintln!("usage: life-analyse NAME world.bin OUT.json");
+        eprintln!("usage: life-analyse NAME world.bin OUT.json [--tile SIZE]");
         std::process::exit(2);
     }
     let mut w = open(&args[2]);
+    // A batch: every world on the map, measured as if it were alone.
+    if let Some(tile) = args.iter().position(|a| a == "--tile").map(|i| args[i + 1].parse::<usize>().expect("--tile SIZE")) {
+        let size = w.size;
+        let per_side = size / tile;
+        let (occ, terrain, fa) = (std::mem::take(&mut w.occ), std::mem::take(&mut w.terrain), std::mem::take(&mut w.fa));
+        w.size = tile;
+        let mut tiles = vec![];
+        for i in 0..per_side * per_side {
+            let (ox, oy) = (i % per_side * tile, i / per_side * tile);
+            let rows: Vec<usize> = (oy..oy + tile).map(|y| y * size + ox).collect();
+            w.occ = rows.iter().flat_map(|r| occ[*r..*r + tile].iter().copied()).collect();
+            w.terrain = rows.iter().flat_map(|r| terrain[*r..*r + tile].iter().copied()).collect();
+            w.fa = rows.iter().flat_map(|r| fa[*r..*r + tile].iter().copied()).collect();
+            let alive = w.occ.iter().filter(|o| **o != 0 && **o != NONE).count();
+            // Too few cells to sort into strategies says enough by itself.
+            if alive < 50 {
+                tiles.push(json!({"tile": i, "alive": alive, "dead": true}));
+                continue;
+            }
+            let e = economy(&w);
+            let b = brains(&mut w);
+            tiles.push(json!({"tile": i, "tick": w.tick, "size": tile, "alive": alive, "economy": e, "brains": b}));
+            eprintln!("{}: tile {i} of {}, {alive} cells", args[1], per_side * per_side);
+        }
+        let out = json!({"name": args[1], "tick": w.tick, "batch_tile": tile, "tiles": tiles});
+        std::fs::write(&args[3], serde_json::to_string(&out).unwrap()).unwrap();
+        return;
+    }
     eprintln!("{}: {} squares wide, {} slots, tick {}", args[1], w.size, w.slots, w.tick);
     let alive = w.occ.iter().filter(|o| **o != 0 && **o != NONE).count();
     let e = economy(&w);

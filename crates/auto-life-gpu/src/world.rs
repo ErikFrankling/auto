@@ -1472,6 +1472,18 @@ impl World {
         }
         let mut sources = vec![];
         for path in paths {
+            // file.bin@256:5 takes one world out of a batch: tile 5 of those 256 wide.
+            let (path, window) = match path.rsplit_once('@') {
+                Some((file, spec)) => {
+                    let (t, i) = spec
+                        .split_once(':')
+                        .ok_or_else(|| format!("{path}: expected file@TILE:INDEX"))?;
+                    let parsed = t.parse::<u64>().ok().zip(i.parse::<u64>().ok());
+                    let window = parsed.ok_or_else(|| format!("{path}: expected file@TILE:INDEX"))?;
+                    (file, Some(window))
+                }
+                None => (path.as_str(), None),
+            };
             let mut f = std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?;
             let mut len = [0u8; 8];
             f.read_exact(&mut len).map_err(|e| e.to_string())?;
@@ -1485,9 +1497,10 @@ impl World {
                 head["slots"].as_u64().unwrap_or(0),
                 head["hidden_rows"].as_u64().unwrap_or(0),
             );
-            if src_hr != hr || src == 0 || src > size || !src.is_power_of_two() {
+            let taken = window.map_or(src, |(t, _)| t);
+            if src_hr != hr || src == 0 || taken > size || !src.is_power_of_two() || !taken.is_power_of_two() || taken > src {
                 return Err(format!(
-                    "{path}: a world {src} wide with {src_hr} rows of memory can't seed this one"
+                    "{path}: a world {taken} wide with {src_hr} rows of memory can't seed this one"
                 ));
             }
             let mut at = 8 + u64::from_le_bytes(len);
@@ -1509,8 +1522,22 @@ impl World {
             let occ_bytes = section("occ")?;
             let cell = section("cell")?;
             let sketch = section("sketch")?;
+            let mut src_occ: Vec<u32> = bytemuck::pod_collect_to_vec(&occ_bytes);
+            if let Some((t, index)) = window {
+                let per_side = src / t;
+                if index >= per_side * per_side {
+                    return Err(format!("{path}: only {} worlds of that size", per_side * per_side));
+                }
+                let (ox, oy) = (index % per_side * t, index / per_side * t);
+                let mut cut = Vec::with_capacity((t * t) as usize);
+                for y in oy..oy + t {
+                    let row = (y * src + ox) as usize;
+                    cut.extend_from_slice(&src_occ[row..row + t as usize]);
+                }
+                src_occ = cut;
+            }
             sources.push(Source {
-                occ: bytemuck::pod_collect_to_vec(&occ_bytes),
+                occ: src_occ,
                 cell,
                 sketch,
                 mem_at: offsets["mem"].0,
@@ -1518,7 +1545,7 @@ impl World {
                 genome1_at: offsets.get("genome1").map_or(0, |o| o.0),
                 shard: src_shard,
                 file: f,
-                size: src,
+                size: taken,
             });
         }
         let src_size = sources
