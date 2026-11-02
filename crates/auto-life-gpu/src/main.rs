@@ -307,13 +307,15 @@ fn run(args: Args) -> Result<(), String> {
             (last_tick, last_gpu, last_wall) = (world.tick, world.gpu_seconds, wall);
             let software = std::env::var("AUTO_ADAPTER").is_ok_and(|a| a.contains("llvmpipe"));
             // The clock can't tell this world's work from waiting behind another program on
-            // the GPU. A world that's too big is slow nearly every time, and waiting is rare.
+            // the GPU. A world that's too big is slow nearly every time. Waiting behind other
+            // work has been seen on up to 4% of submissions, about 80 ms each, in worlds whose
+            // own submissions took 11 ms.
             let submits = (world.submits - last_submits).max(1);
             last_submits = world.submits;
             if !args.force
                 && !software
                 && world.slow_submits >= 5
-                && world.slow_submits as u64 * 50 >= submits as u64
+                && world.slow_submits as u64 * 4 >= submits as u64
             {
                 return Err(format!(
                     "{} of {} submissions held the GPU over 80 ms, the longest {:.0} ms, so the desktop would stutter. Use a smaller world.",

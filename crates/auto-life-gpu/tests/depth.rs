@@ -1554,10 +1554,10 @@ fn measuring_changes_nothing_with_the_deep_rules() {
 /// once, turning on the ledger changes one lone cell's choice to step on its first tick, though
 /// nothing it reads differs. Thread count and the driver's optimiser make no difference, and
 /// adding a few lines of shader to record that choice makes the difference go away. 16 random
-/// mixes of up to 17 switches showed nothing. So it looks like the compiler on a shader this
-/// size, but the cause isn't known. Run it on the real GPU.
+/// mixes of up to 17 switches showed nothing. It fails on the real GPU too, so a bug in one
+/// driver's compiler doesn't explain it. The cause isn't known. Screens leave the ledger off.
 #[test]
-#[ignore = "fails on the software driver with every rule on, see the comment"]
+#[ignore = "fails on both drivers with every rule on, see the comment"]
 fn measuring_changes_nothing_with_everything_on() {
     let mut sets = ALL_RULES.to_vec();
     sets.extend_from_slice(DEEP_RULES);
