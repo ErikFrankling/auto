@@ -7,8 +7,8 @@ Every number here was checked against the data on 2026-11-02. The clean one-rule
 - 384 worlds, 256 wide, 120,000 ticks (about 500 generations): 32 unmodified, and 22 sets of physics with 16 seeds each. Results in `results.jsonl`, each set read by a sub-agent with its maps in `reads/`.
 - All 32 baseline worlds lived. Of the 22 rule mixes, 7 lost all 16 worlds and 2 more kept only 1 or 2. A rain of random cells can restart a dead world, by design, so some "regrown" worlds are new starts.
 - Unmodified physics already varies hugely by seed: 1 to 4 lasting strategies, 3 to 16.5 species, 2% to 35% of energy from other cells, and 0% to 20% from biting. Three seeds could never have shown this.
-- No rule mix raised lasting strategies above the baseline. Most made worlds duller: few species, less biting. The first screen changed many settings at once, so it can't say what one rule does. That's what `b1-*` is for.
-- Kinds of baseline world (sub-agent's sorting of 32): 9 steady grazers, 8 drifting to rest, 7 part-time biters, 4 relays where the main strategy keeps being replaced, 4 hunting economies. The middle cuts are arbitrary, since biting runs in a continuum.
+- One rule mix raised lasting strategies above the baseline: `b0-0011`, 3 against 2. It doesn't count as a win, since only 8 of its 16 worlds lived, with a median of 1,146 cells, 7 of those 8 with a single species, and 99% of energy from the ground. Most other mixes made worlds duller: few species, less biting. The first screen changed many settings at once, so it can't say what one rule does. That's what `b1-*` is for.
+- Kinds of baseline world (a sub-agent's reading of 32, not checked against any data file): 9 steady grazers, 8 drifting to rest, 7 part-time biters, 4 relays where the main strategy keeps being replaced, 4 hunting economies. The middle cuts are arbitrary, since biting runs in a continuum.
 - No thin trails in any map that readers opened. Group hunting didn't appear. The gang rule pays per bite where it's on, but bites stay solo: in `b0-0012`, 90% of bites were alone.
 
 ## Biters don't choose
@@ -21,13 +21,13 @@ Turning biting off on saved worlds and running 30,000 more ticks barely changes 
 
 ## Five times longer doesn't help
 
-16 baseline worlds continued from 120,000 to 600,000 ticks. Strategies over 3% stay at a median of 2. Behaviour dimensions stay at 3.4. Worlds settle one of two ways: lawns where resting climbs to 50-60%, cells double, biting vanishes and species multiply as clonal patches (t006, t011, t012, t013, and t004 partly), or scrambles where biting rises to 15-23% of energy and cells stay low (t000, t002, t010, t014, t015).
+16 baseline worlds continued from 120,000 to 600,000 ticks. Strategies over 3% stay at a median of 2. Behaviour dimensions stay at 3.4. Most worlds head one of two ways: lawns where resting climbs to 50-60%, cells rise by 1.2 to 2.1 times, biting vanishes and species usually multiply as clonal patches (t006, t012, t013, t004 partly, and t011, which barely gains species), or scrambles where biting rises to 14-23% of energy and cells stay low (t000, t002, t007, t010, t014, t015). The cut-offs are read off the data: at least 40% resting, or at least 13% of energy from biting.
 
 ## Things that looked real and weren't
 
-- **Population cycles** in `b0-0001-t000` and others, about 6,400 to 13,300 cells, with a period of 4 samples. All worlds share that rhythm. Samples every 30,000 ticks alias against the built-in 8,000-tick season: it's seasons. Don't sample at a period that shares a low common multiple with the season.
-- **Life hugging the outer wall in mineral worlds.** Real, but an artefact of the mineral rule. Mineral piles against rock at 11 to 35 times the density inside the world, at all tested flow settings, and cells follow it. Next to natural rock it's 6 to 10 times higher too, in the two worlds measured. So mineral worlds didn't test a second resource. Likely carried there by cells and released where they die, but that mechanism isn't tested.
-- **"Traffic on lines"** is high wherever colonies are. No map showed lines. It's useless as a trail detector as built.
+- **Population cycles** in `b0-0001-t000` and others, about 6,400 to 13,300 cells, with a period of 4 samples. The point in the year explains at least 75% of the swing in 12 of 16 worlds (22% to 67% in t004, t006, t011, t013). Samples every 30,000 ticks alias against the built-in 8,000-tick season: it's seasons. Don't sample at a period that shares a low common multiple with the season.
+- **Life hugging the outer wall in mineral worlds.** Real, but an artefact of the mineral rule. Mineral piles against rock at 11 to 35 times the density inside the world, at all tested flow settings, and cells follow it. Next to natural rock it's about 7 to 11 times higher too, in the two worlds measured. So mineral worlds didn't test a second resource. Likely carried there by cells and released where they die, but that mechanism isn't tested.
+- **"Traffic on lines"** doesn't track colonies either: its rank correlation with colony count is +0.01 in plain worlds, and live worlds with no colonies score 88 against 92 overall. No map showed lines. It's useless as a trail detector as built, and what it does measure is unexplained.
 - **"Lives on other cells: 27%"** in rank tables is the average of per-cell ratios. Energy flows say 8% for the same world. Use flows.
 
 ## Why this engine can't make bodies
