@@ -3,6 +3,8 @@
   "season_ticks": 8000,
   "ground_cap": 4,
   "rock": true,
+  "terrain_style": 1,
+  "terrain_contrast": 2.4,
 
   "rain_p": 0.00125,
   "rain_energy": 6,
