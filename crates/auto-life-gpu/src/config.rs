@@ -7,13 +7,20 @@ use std::path::PathBuf;
 
 /// Scent and sensor layout, shared with the shaders. Input and output counts are
 /// in blocks of four, because the GPU does best with 4x4 weight blocks.
-pub const IN_BLOCKS: u32 = 13;
-pub const OUT_ROWS: u32 = 6;
+///
+/// Inputs 0-11 are the senses every cell has. 12 is waste, 13 tracks, 14 practice and how a
+/// place feels, and 15-17 are free. Outputs 0-5 are as act.wgsl describes, and 6 is free:
+/// it holds the spare budget actions x0 to x3. Weights exist for all of them, but
+/// [`Config::input_live`] and [`Config::output_live`] leave out what no rule that is on uses.
+pub const IN_BLOCKS: u32 = 18;
+pub const OUT_ROWS: u32 = 7;
 pub const SUN_RANGE: f32 = 8.0;
-/// Bytes per square: occ, seen, seen_next, terrain, and three vec4 fields.
-pub const SQUARE_BYTES: u64 = 4 + 4 + 4 + 4 + 16 * 3;
-pub const CELL_BYTES: u64 = 64;
-pub const STAT_BYTES: u64 = 112;
+/// Bytes per square: occ, seen, seen_next, terrain, and four vec4 fields.
+pub const SQUARE_BYTES: u64 = 4 + 4 + 4 + 4 + 16 * 4;
+pub const CELL_BYTES: u64 = 96;
+pub const CELL_WORDS: usize = CELL_BYTES as usize / 4;
+pub const STAT_BYTES: u64 = 144;
+pub const STAT_WORDS: usize = STAT_BYTES as usize / 4;
 pub const TILE_ROW_BYTES: u64 = 48;
 
 #[derive(Clone)]
@@ -54,6 +61,32 @@ impl Config {
         cfg.shard_slots = cfg.max_shard_slots();
         cfg.slots = cfg.default_slots();
         Ok(cfg)
+    }
+
+    /// Whether a brain input block can be anything but zero in this world. A block
+    /// that can't is not computed at all, so a rule that's off costs only its weights.
+    /// A rule that adds an input must add its switch here.
+    pub fn input_live(&self, block: u32) -> bool {
+        match block {
+            12 => self.b("waste_on"),
+            13 => self.b("roads_on"),
+            14 => {
+                (self.b("skill_on") && self.b("skill_sense"))
+                    || (self.b("biomes_on") && self.b("biome_feel"))
+            }
+            15..=17 => false,
+            _ => true,
+        }
+    }
+
+    /// Whether a brain output row is read by anything in this world.
+    pub fn output_live(&self, row: u32) -> bool {
+        match row {
+            6 => ["x0_on", "x1_on", "x2_on", "x3_on"]
+                .iter()
+                .any(|k| self.b(k)),
+            _ => true,
+        }
     }
 
     pub fn blocks(&self) -> u32 {
@@ -186,7 +219,7 @@ impl Config {
         }
         for r in 0..hr {
             s += &format!("    let h{r} = squash(");
-            for k in 0..IN_BLOCKS {
+            for k in (0..IN_BLOCKS).filter(|k| self.input_live(*k)) {
                 s += &format!("bt(base + {}u, i{k}) + ", r * IN_BLOCKS + k);
             }
             let terms: Vec<String> = (0..hr)
@@ -199,6 +232,10 @@ impl Config {
             s += &format!("    mem[ms + {r}u] = h{r};\n");
         }
         for o in 0..OUT_ROWS {
+            if !self.output_live(o) {
+                s += &format!("    let o{o} = vec4f(0.0);\n");
+                continue;
+            }
             let terms: Vec<String> = (0..hr)
                 .map(|j| format!("bt(base + HO_BASE + {}u, h{j})", o * hr + j))
                 .collect();
@@ -210,6 +247,29 @@ impl Config {
         }
         (s, copy)
     }
+}
+
+/// What a save or dump records about its layout, so a world from another layout is
+/// refused with a clear message instead of being read as garbage.
+pub fn layout_json() -> Value {
+    serde_json::json!({
+        "in_blocks": IN_BLOCKS, "out_rows": OUT_ROWS, "cell_bytes": CELL_BYTES, "stat_bytes": STAT_BYTES,
+    })
+}
+
+/// Checks a save's or dump's header against this build's layout.
+pub fn check_layout(head: &Value, path: &str) -> Result<(), String> {
+    if head["layout"] == layout_json() {
+        return Ok(());
+    }
+    let saved = if head["layout"].is_null() {
+        "an older layout, 13 input blocks and 6 output rows with 64-byte cells".to_string()
+    } else {
+        head["layout"].to_string()
+    };
+    Err(format!(
+        "{path} was saved with {saved}, and this engine has {IN_BLOCKS} input blocks and {OUT_ROWS} output rows with {CELL_BYTES}-byte cells. Old worlds can't be loaded. Rerun it from its seed, or use the binary that made it"
+    ))
 }
 
 fn read_source(dir: &Option<PathBuf>, file: &str) -> Result<String, String> {

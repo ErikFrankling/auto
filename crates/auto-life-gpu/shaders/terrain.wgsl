@@ -125,7 +125,35 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     }
     let phase_noise = select(vnoise(x, y, scale_of(256u), seed ^ 15u), bent(fx, fy, scale_of(128u), seed ^ 15u), new_style);
     let phase = u32(phase_noise * 2.0 * 255.0) & 255u;
-    let biome = u32(vnoise(x, y, scale_of(1024u), seed ^ 51u) * 15.99);
+    var biome = u32(vnoise(x, y, scale_of(1024u), seed ^ 51u) * 15.99);
+    var place = 0u;
+    if (BIOMES_ON || WALLS_ON) {
+        // Rooms with wandering edges. The wander is gentle enough that a wall never thins to nothing.
+        let room_w = W / 4u;
+        let wander = scale_of(room_w / 2u);
+        let u = f32(x) / f32(room_w) + 0.2 * (vnoise(x, y, wander, seed ^ 61u) - 0.5);
+        let v = f32(y) / f32(room_w) + 0.2 * (vnoise(x, y, wander, seed ^ 62u) - 0.5);
+        let fu = u - floor(u);
+        let fv = v - floor(v);
+        biome = (u32(i32(floor(u)) & 3) | (u32(i32(floor(v)) & 3) << 2u));
+        place = place_of_room(biome);
+        if (WALLS_ON) {
+            let r = f32(room_w);
+            let du = min(fu, 1.0 - fu) * r;
+            let dv = min(fv, 1.0 - fv) * r;
+            // One pass through the middle of each wall between two rooms.
+            let wall_u = du < WALL_THICK * 0.5;
+            let wall_v = dv < WALL_THICK * 0.5;
+            let pass_u = abs(fv - 0.5) * r < WALL_PASS * 0.5;
+            let pass_v = abs(fu - 0.5) * r < WALL_PASS * 0.5;
+            if ((wall_u && !pass_u) || (wall_v && !pass_v)) {
+                rock = true;
+            } else if (wall_u || wall_v) {
+                rock = false;
+            }
+        }
+    }
+    if (BIOMES_ON) { base *= SUNX_V[place]; }
     var t = u32(clamp(base / SUN_RANGE, 0.0, 1.0) * 65535.0) | (phase << 16u) | (biome << 28u);
     if (rock) { t |= T_ROCK; }
     terrain[p] = t;
@@ -135,6 +163,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
     fa[p] = vec4f(select(min(GROUND_CAP, base * 2.0 * SUN / 0.05), 0.0, rock), 0.0, 0.0, 0.0);
     fb[p] = vec4f(0.0);
     fc[p] = vec4f(0.0);
+    fd[p] = vec4f(0.0);
 }
 
 @compute @workgroup_size(64)

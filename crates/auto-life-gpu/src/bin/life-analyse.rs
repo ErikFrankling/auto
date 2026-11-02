@@ -11,11 +11,32 @@ use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 
 const NONE: u32 = u32::MAX;
-const IN_BLOCKS: usize = 13;
-const OUT_ROWS: usize = 6;
+const IN_BLOCKS: usize = auto_life_gpu::config::IN_BLOCKS as usize;
+const OUT_ROWS: usize = auto_life_gpu::config::OUT_ROWS as usize;
+const CELL_WORDS: usize = auto_life_gpu::config::CELL_WORDS;
+const STAT_WORDS: usize = auto_life_gpu::config::STAT_WORDS;
 const SUN_RANGE: f32 = 8.0;
-const ACTIONS: [&str; 10] =
-    ["rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme"];
+const ACTIONS: [&str; 12] = [
+    "rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme", "armour", "clean",
+];
+/// Whether the armour and clean actions exist in this world. Set once, from the save.
+static RULE_ACTIONS: std::sync::OnceLock<[bool; 2]> = std::sync::OnceLock::new();
+
+/// One tick's budget shares, as the shader splits them. Actions that are off get nothing.
+fn split_budget(raw: &[f32; 12]) -> [f32; 12] {
+    let on = RULE_ACTIONS.get().copied().unwrap_or([false; 2]);
+    let top = raw.iter().cloned().fold(f32::MIN, f32::max);
+    let mut s = [0.0f32; 12];
+    let mut z = 0.0;
+    for i in 0..12 {
+        if i < 10 || on[i - 10] {
+            s[i] = (raw[i] - top).clamp(-20.0, 0.0).exp();
+            z += s[i];
+        }
+    }
+    s.iter_mut().for_each(|v| *v /= z);
+    s
+}
 const DIRS: [(i32, i32); 8] =
     [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)];
 
@@ -56,8 +77,8 @@ struct Save {
     occ: Vec<u32>,
     terrain: Vec<u32>,
     fa: Vec<[f32; 4]>,
-    cell: Vec<[u32; 16]>,
-    stat: Vec<[f32; 28]>,
+    cell: Vec<[u32; CELL_WORDS]>,
+    stat: Vec<[f32; STAT_WORDS]>,
 }
 
 fn read_vec<T: bytemuck::Pod>(f: &mut std::fs::File, at: u64, bytes: u64) -> Vec<T> {
@@ -75,6 +96,12 @@ fn open(path: &str) -> Save {
     let mut head = vec![0u8; n as usize];
     f.read_exact(&mut head).unwrap();
     let head: Value = serde_json::from_slice(&head).unwrap();
+    if let Err(why) = auto_life_gpu::config::check_layout(&head, path) {
+        eprintln!("{why}");
+        std::process::exit(2);
+    }
+    let on = |k: &str| head["physics"][k].as_bool().unwrap_or(false);
+    let _ = RULE_ACTIONS.set([on("armour_on"), on("waste_on") && on("waste_clean")]);
     let size = head["size"].as_u64().unwrap() as usize;
     let slots = head["slots"].as_u64().unwrap() as usize;
     let hr = head["hidden_rows"].as_u64().unwrap() as usize;
@@ -97,8 +124,9 @@ fn open(path: &str) -> Save {
         ("fa", squares * 16),
         ("fb", squares * 16),
         ("fc", squares * 16),
-        ("cell", slots64 * 64),
-        ("stat", slots64 * 112),
+        ("fd", squares * 16),
+        ("cell", slots64 * auto_life_gpu::config::CELL_BYTES),
+        ("stat", slots64 * auto_life_gpu::config::STAT_BYTES),
         ("sketch", slots64 * 16),
         ("mem", slots64 * hr as u64 * 16),
         ("genome", slots64.min(shard) * blocks as u64 * 16),
@@ -523,7 +551,7 @@ fn think(g: &[f32], hr: usize, input: &Inputs, mem: &mut [[f32; 4]]) -> [[f32; 4
 }
 
 /// Budget shares, heading and willingness in a situation, from a blank memory after a few ticks.
-fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 10], f32, f32) {
+fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 12], f32, f32) {
     let mut mem = vec![[0.0f32; 4]; hr];
     let mut out = [[0.0f32; 4]; OUT_ROWS];
     for _ in 0..3 {
@@ -533,15 +561,7 @@ fn act(g: &[f32], hr: usize, input: &Inputs) -> ([f32; 10], f32, f32) {
         out[0][0], out[0][1], out[0][2], out[0][3], out[1][0], out[1][1], out[1][2], out[1][3], out[2][0], out[2][1],
         out[2][2], out[2][3],
     ];
-    let top = raw.iter().cloned().fold(f32::MIN, f32::max);
-    let mut s = [0.0f32; 10];
-    let mut z = 0.0;
-    for i in 0..10 {
-        s[i] = (raw[i] - top).clamp(-20.0, 0.0).exp();
-        z += s[i];
-    }
-    s.iter_mut().for_each(|v| *v /= z);
-    (s, out[3][0], out[3][1])
+    (split_budget(&raw), out[3][0], out[3][1])
 }
 
 fn sat(v: f32, s: f32) -> f32 {
@@ -587,9 +607,10 @@ fn inputs_for(s: &Situation) -> Inputs {
     i
 }
 
-const INPUT_NAMES: [(&str, usize, usize); 52] = [
+/// Inputs and, for those of a rule, the switch that makes them anything but zero.
+const INPUT_NAMES: [(&str, usize, usize); 58] = [
     ("own energy", 0, 0), ("womb", 0, 1), ("age", 0, 2), ("felt damage", 0, 3),
-    ("noise input", 1, 0), ("bias", 1, 1), ("crowding", 1, 2), ("spare x0", 1, 3),
+    ("noise input", 1, 0), ("bias", 1, 1), ("crowding", 1, 2), ("own hardness", 1, 3),
     ("ground here", 2, 0), ("meat here", 2, 1), ("heat here", 2, 2), ("noise here", 2, 3),
     ("scent 0 here", 3, 0), ("scent 1 here", 3, 1), ("scent 2 here", 3, 2), ("scent 3 here", 3, 3),
     ("ground east", 4, 0), ("meat east", 4, 1), ("heat east", 4, 2), ("noise east", 4, 3),
@@ -600,15 +621,37 @@ const INPUT_NAMES: [(&str, usize, usize); 52] = [
     ("front signal 0", 9, 0), ("front signal 1", 9, 1), ("front faces me", 9, 2), ("enzyme here", 9, 3),
     ("bigger east", 10, 0), ("bigger south", 10, 1), ("smaller east", 10, 2), ("smaller south", 10, 3),
     ("signal 0 east", 11, 0), ("signal 0 south", 11, 1), ("signal 1 east", 11, 2), ("signal 1 south", 11, 3),
-    ("spare field", 12, 0), ("spare east", 12, 1), ("spare south", 12, 2), ("spare x1", 12, 3),
+    ("waste here", 12, 0), ("waste east", 12, 1), ("waste south", 12, 2),
+    ("track here", 13, 0), ("track east", 13, 1), ("track south", 13, 2),
+    ("practice at grazing", 14, 0), ("practice at bodies", 14, 1), ("felt upkeep", 14, 2), ("felt drag", 14, 3),
 ];
+
+/// The switch behind a rule's input. An input with its rule off always reads zero, so
+/// testing it would only measure weights that do nothing.
+fn input_switches(name: &str) -> &'static [&'static str] {
+    match name {
+        "own hardness" => &["armour_on"],
+        "waste here" | "waste east" | "waste south" => &["waste_on"],
+        "track here" | "track east" | "track south" => &["roads_on"],
+        "practice at grazing" | "practice at bodies" => &["skill_on", "skill_sense"],
+        "felt upkeep" | "felt drag" => &["biomes_on", "biome_feel"],
+        _ => &[],
+    }
+}
 
 /// What a genome does across a fixed set of situations.
 fn fingerprint(g: &[f32], hr: usize, situations: &[Situation]) -> Vec<f32> {
-    let mut v = Vec::with_capacity(situations.len() * 10);
+    let on = RULE_ACTIONS.get().copied().unwrap_or([false; 2]);
+    let mut v = Vec::with_capacity(situations.len() * 12);
     for s in situations {
         let (shares, _, _) = act(g, hr, &inputs_for(s));
-        v.extend_from_slice(&shares);
+        v.extend_from_slice(&shares[..10]);
+        // Only actions that exist count, so a rule that's off doesn't change the measure.
+        for k in 0..2 {
+            if on[k] {
+                v.push(shares[10 + k]);
+            }
+        }
     }
     v
 }
@@ -800,19 +843,20 @@ fn brains(w: &mut Save) -> Value {
     // How much does a brain change what it does between situations? A constant function scores 0.
     let per = situations.len();
     let reactivity = |print: &[f32]| -> f32 {
-        let mut mean = [0.0f32; 10];
+        let actions = print.len() / per;
+        let mut mean = [0.0f32; 12];
         for s in 0..per {
-            for a in 0..10 {
-                mean[a] += print[s * 10 + a] / per as f32;
+            for a in 0..actions {
+                mean[a] += print[s * actions + a] / per as f32;
             }
         }
         let mut var = 0.0;
         for s in 0..per {
-            for a in 0..10 {
-                var += (print[s * 10 + a] - mean[a]).powi(2);
+            for a in 0..actions {
+                var += (print[s * actions + a] - mean[a]).powi(2);
             }
         }
-        (var / (per * 10) as f32).sqrt()
+        (var / (per * actions) as f32).sqrt()
     };
     let reacts: Vec<f32> = prints.iter().map(|p| reactivity(p)).collect();
     let mean_react = reacts.iter().sum::<f32>() / reacts.len().max(1) as f32;
@@ -860,15 +904,15 @@ fn brains(w: &mut Save) -> Value {
         let mut out = serde_json::Map::new();
         for (name, s) in &named {
             let i = inputs_for(s);
-            let mut m = [0.0f32; 10];
+            let mut m = [0.0f32; 12];
             for g in gs {
                 let (shares, _, _) = act(g, hr, &i);
-                for a in 0..10 {
+                for a in 0..12 {
                     m[a] += shares[a] / gs.len() as f32;
                 }
             }
             let mut b = serde_json::Map::new();
-            for a in 0..10 {
+            for a in 0..12 {
                 b.insert(ACTIONS[a].into(), json!(round3(m[a])));
             }
             out.insert((*name).to_string(), Value::Object(b));
@@ -952,15 +996,18 @@ fn brains(w: &mut Save) -> Value {
     strategies.sort_by(|a, b| b["share"].as_f64().partial_cmp(&a["share"].as_f64()).unwrap());
 
     // Which senses change behaviour at all?
-    let base_shares: Vec<[f32; 10]> = genomes.iter().take(400).map(|g| act(g, hr, &base).0).collect();
+    let base_shares: Vec<[f32; 12]> = genomes.iter().take(400).map(|g| act(g, hr, &base).0).collect();
     let mut senses = vec![];
     for (name, b, s) in INPUT_NAMES {
+        if input_switches(name).iter().any(|k| !w.physics[k].as_bool().unwrap_or(false)) {
+            continue;
+        }
         let mut sum = 0.0f32;
         let mut i = base;
         i[b][s] = if base[b][s].abs() > 0.5 { 0.0 } else { 0.9 };
         for (g, before) in genomes.iter().take(400).zip(&base_shares) {
             let (after, _, _) = act(g, hr, &i);
-            sum += (0..10).map(|a| (after[a] - before[a]).abs()).sum::<f32>() / 2.0;
+            sum += (0..12).map(|a| (after[a] - before[a]).abs()).sum::<f32>() / 2.0;
         }
         senses.push((name, sum / base_shares.len().max(1) as f32));
     }
@@ -979,18 +1026,10 @@ fn brains(w: &mut Save) -> Value {
         let out_fresh = think(g, hr, &base, &mut fresh);
         let budget = |o: &[[f32; 4]; OUT_ROWS]| {
             let raw = [o[0][0], o[0][1], o[0][2], o[0][3], o[1][0], o[1][1], o[1][2], o[1][3], o[2][0], o[2][1], o[2][2], o[2][3]];
-            let top = raw.iter().cloned().fold(f32::MIN, f32::max);
-            let mut s = [0.0f32; 10];
-            let mut z = 0.0;
-            for i in 0..10 {
-                s[i] = (raw[i] - top).clamp(-20.0, 0.0).exp();
-                z += s[i];
-            }
-            s.iter_mut().for_each(|v| *v /= z);
-            s
+            split_budget(&raw)
         };
         let (a, b) = (budget(&out_after), budget(&out_fresh));
-        memory_effect += (0..10).map(|i| (a[i] - b[i]).abs()).sum::<f32>() / 2.0;
+        memory_effect += (0..12).map(|i| (a[i] - b[i]).abs()).sum::<f32>() / 2.0;
     }
     memory_effect /= genomes.len().min(400).max(1) as f32;
 
