@@ -6,9 +6,13 @@ use serde_json::{Value, json};
 use crate::config::{CELL_BYTES, SKETCH_BYTES, STAT_BYTES, cell, stat};
 use crate::world::World;
 
-pub const ACTIONS: [&str; 12] = [
-    "rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme", "x0", "x1",
+pub const ACTIONS: [&str; 16] = [
+    "rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme", "armour",
+    "clean", "x0", "x1", "x2", "x3",
 ];
+/// The actions that count as how a cell lives: all but the spare ones.
+const LIVING_ACTIONS: usize = 12;
+const BEHAVIOUR_DIMS: usize = 21;
 const SKETCH_RANGE: f32 = 4.0;
 
 #[derive(Clone)]
@@ -19,15 +23,23 @@ pub struct Sample {
     pub hit: f32,
     pub voice: [f32; 2],
     pub flags: u32,
+    /// How a place feels: its upkeep and its drag.
+    pub feel: [f32; 2],
+    pub mate_kids: f32,
+    /// The experiment words, x0 to x3.
+    pub spare: [f32; 4],
     pub pos: u32,
     pub clade: u32,
     pub generation: u32,
+    /// Hardness, wound, practice at grazing, practice at eating bodies.
     pub x: [f32; 4],
     pub diet: [f32; 4],
-    pub budget: [f32; 12],
+    pub budget: [f32; 16],
     pub chase: [f32; 4],
     pub follow: [f32; 4],
     pub misc: [f32; 4],
+    /// Rule measures, zero unless roads_stats is on.
+    pub measures: [f32; 4],
     pub sketch: [f32; 16],
     pub genome_at: usize,
 }
@@ -97,6 +109,9 @@ pub fn sample_with(world: &mut World, want: usize, with_genomes: bool) -> Sample
             genomes.extend(g.iter().map(|b| *b as i8));
         }
         let arr4 = |k: usize| -> [f32; 4] { st[k..k + 4].try_into().unwrap() };
+        let mut budget = [0.0f32; 16];
+        budget[..12].copy_from_slice(&st[stat::BUDGET..stat::BUDGET + 12]);
+        budget[12..].copy_from_slice(&st[stat::SPARE..stat::SPARE + 4]);
         cells.push(Sample {
             e,
             womb: f(cell::WOMB),
@@ -104,17 +119,19 @@ pub fn sample_with(world: &mut World, want: usize, with_genomes: bool) -> Sample
             hit: f(cell::HIT),
             voice: [f(cell::VOICE), f(cell::VOICE + 1)],
             flags: u(cell::FLAGS),
+            feel: [f(cell::FEEL_U), f(cell::FEEL_D)],
+            mate_kids: f(cell::MATE_KIDS),
+            spare: std::array::from_fn(|k| f(cell::SPARE + k)),
             pos: u(cell::POS),
             clade: u(cell::CLADE),
             generation: u(cell::GEN),
-            x: std::array::from_fn(|k| f(cell::X + k)),
+            x: std::array::from_fn(|k| f(cell::HARD + k)),
             diet: arr4(stat::DIET),
-            budget: st[stat::BUDGET..stat::BUDGET + ACTIONS.len()]
-                .try_into()
-                .unwrap(),
+            budget,
             chase: arr4(stat::CHASE),
             follow: arr4(stat::FOLLOW),
             misc: arr4(stat::MISC),
+            measures: arr4(stat::MEASURES),
             sketch: sk,
             genome_at,
         });
@@ -186,26 +203,27 @@ fn lives_on(diet: [f32; 4]) -> [f32; 4] {
     [diet[0] / t, diet[1] / t, diet[2] / t, diet[3] / t]
 }
 
-fn behaviour(c: &Sample) -> [f32; 19] {
+fn behaviour(c: &Sample) -> [f32; BEHAVIOUR_DIMS] {
     let l = lives_on(c.diet);
-    let mut v = [0.0; 19];
+    let mut v = [0.0; BEHAVIOUR_DIMS];
     v[0] = l[0];
     v[1] = l[1];
     v[2] = l[2];
     v[3] = l[3];
-    v[4..14].copy_from_slice(&c.budget[..10]);
-    v[14] = c.chase[0];
-    v[15] = c.chase[1];
-    v[16] = c.chase[2];
-    v[17] = c.chase[3];
-    v[18] = c.misc[0];
+    v[4..4 + LIVING_ACTIONS].copy_from_slice(&c.budget[..LIVING_ACTIONS]);
+    v[16] = c.chase[0];
+    v[17] = c.chase[1];
+    v[18] = c.chase[2];
+    v[19] = c.chase[3];
+    v[20] = c.misc[0];
     v
 }
 
 fn describe(cells: &[Sample], idx: &[usize], total: usize, size: u32) -> Value {
     let n = idx.len().max(1) as f32;
     let (mut diet, mut budget, mut chase, mut follow) =
-        ([0.0f32; 4], [0.0f32; 12], [0.0f32; 4], [0.0f32; 4]);
+        ([0.0f32; 4], [0.0f32; 16], [0.0f32; 4], [0.0f32; 4]);
+    let (mut state, mut measures) = ([0.0f32; 4], [0.0f32; 4]);
     let (mut e, mut age, mut gen_, mut crowd, mut bk, mut bo) =
         (0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32);
     let (mut cx, mut sx, mut cy, mut sy) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
@@ -215,8 +233,10 @@ fn describe(cells: &[Sample], idx: &[usize], total: usize, size: u32) -> Value {
             diet[k] += c.diet[k];
             chase[k] += c.chase[k] / n;
             follow[k] += c.follow[k] / n;
+            state[k] += c.x[k] / n;
+            measures[k] += c.measures[k] / n;
         }
-        for k in 0..12 {
+        for k in 0..16 {
             budget[k] += c.budget[k] / n;
         }
         e += c.e / n;
@@ -234,7 +254,7 @@ fn describe(cells: &[Sample], idx: &[usize], total: usize, size: u32) -> Value {
     }
     let l = lives_on(diet);
     let mut b = serde_json::Map::new();
-    for k in 0..12 {
+    for k in 0..16 {
         b.insert(ACTIONS[k].into(), json!(round3(budget[k])));
     }
     json!({
@@ -252,6 +272,10 @@ fn describe(cells: &[Sample], idx: &[usize], total: usize, size: u32) -> Value {
         "follows_scent": [round3(follow[0]), round3(follow[1]), round3(follow[2]), round3(follow[3])],
         "bites_on_similar": if bk + bo > 1e-6 { round3(bk / (bk + bo)) } else { 0.0 },
         "spread": round3(1.0 - ((cx * cx + sx * sx).sqrt() + (cy * cy + sy * sy).sqrt()) / 2.0),
+        "hardness": round3(state[0]),
+        "wound": round3(state[1]),
+        "practice": [round3(state[2]), round3(state[3])],
+        "measures": [round3(measures[0]), round3(measures[1]), round3(measures[2]), round3(measures[3])],
     })
 }
 
@@ -262,10 +286,10 @@ fn round3(v: f32) -> f32 {
 /// Groups cells by how they live, ignoring genes, using k-means on z-scores.
 fn lifestyles(cells: &[Sample], k: usize) -> (Vec<Vec<usize>>, Vec<usize>) {
     let n = cells.len();
-    let dims = 19;
-    let data: Vec<[f32; 19]> = cells.iter().map(behaviour).collect();
-    let mut mean = [0.0f32; 19];
-    let mut var = [0.0f32; 19];
+    let dims = BEHAVIOUR_DIMS;
+    let data: Vec<[f32; BEHAVIOUR_DIMS]> = cells.iter().map(behaviour).collect();
+    let mut mean = [0.0f32; BEHAVIOUR_DIMS];
+    let mut var = [0.0f32; BEHAVIOUR_DIMS];
     for v in &data {
         for d in 0..dims {
             mean[d] += v[d] / n as f32;
@@ -276,20 +300,21 @@ fn lifestyles(cells: &[Sample], k: usize) -> (Vec<Vec<usize>>, Vec<usize>) {
             var[d] += (v[d] - mean[d]).powi(2) / n as f32;
         }
     }
-    let z: Vec<[f32; 19]> = data
+    let z: Vec<[f32; BEHAVIOUR_DIMS]> = data
         .iter()
         .map(|v| {
-            let mut o = [0.0; 19];
+            let mut o = [0.0; BEHAVIOUR_DIMS];
             for d in 0..dims {
                 o[d] = (v[d] - mean[d]) / var[d].sqrt().max(1e-3);
             }
             o
         })
         .collect();
-    let dist =
-        |a: &[f32; 19], b: &[f32; 19]| -> f32 { (0..dims).map(|d| (a[d] - b[d]).powi(2)).sum() };
+    let dist = |a: &[f32; BEHAVIOUR_DIMS], b: &[f32; BEHAVIOUR_DIMS]| -> f32 {
+        (0..dims).map(|d| (a[d] - b[d]).powi(2)).sum()
+    };
     // Farthest-first starts make this the same on every run.
-    let mut centres: Vec<[f32; 19]> = vec![z[0]];
+    let mut centres: Vec<[f32; BEHAVIOUR_DIMS]> = vec![z[0]];
     while centres.len() < k {
         let far = (0..n)
             .max_by(|&a, &b| {
@@ -319,7 +344,7 @@ fn lifestyles(cells: &[Sample], k: usize) -> (Vec<Vec<usize>>, Vec<usize>) {
             }
             label[i] = best;
         }
-        let mut sum = vec![[0.0f32; 19]; k];
+        let mut sum = vec![[0.0f32; BEHAVIOUR_DIMS]; k];
         let mut count = vec![0f32; k];
         for i in 0..n {
             count[label[i]] += 1.0;
@@ -354,38 +379,38 @@ fn species_explain_behaviour(cells: &[Sample], gs: &[Vec<usize>], scaled: bool) 
     if k < 2 || members.len() <= k + 1 {
         return 0.0;
     }
-    let mut data: Vec<[f32; 19]> = cells.iter().map(behaviour).collect();
-    let mut mean = [0.0f32; 19];
+    let mut data: Vec<[f32; BEHAVIOUR_DIMS]> = cells.iter().map(behaviour).collect();
+    let mut mean = [0.0f32; BEHAVIOUR_DIMS];
     for &i in &members {
-        for d in 0..19 {
+        for d in 0..BEHAVIOUR_DIMS {
             mean[d] += data[i][d] / members.len() as f32;
         }
     }
     // Scaled, every measure counts the same, so noisy ones can't drown out a clean split in diet.
     if scaled {
-        let mut var = [0.0f32; 19];
+        let mut var = [0.0f32; BEHAVIOUR_DIMS];
         for &i in &members {
-            for d in 0..19 {
+            for d in 0..BEHAVIOUR_DIMS {
                 var[d] += (data[i][d] - mean[d]).powi(2) / members.len() as f32;
             }
         }
         for row in data.iter_mut() {
-            for d in 0..19 {
+            for d in 0..BEHAVIOUR_DIMS {
                 row[d] = (row[d] - mean[d]) / var[d].sqrt().max(1e-3);
             }
         }
-        mean = [0.0; 19];
+        mean = [0.0; BEHAVIOUR_DIMS];
     }
     let (mut within, mut total) = (0.0f32, 0.0f32);
     for g in &big {
-        let mut gm = [0.0f32; 19];
+        let mut gm = [0.0f32; BEHAVIOUR_DIMS];
         for &i in g.iter() {
-            for d in 0..19 {
+            for d in 0..BEHAVIOUR_DIMS {
                 gm[d] += data[i][d] / g.len() as f32;
             }
         }
         for &i in g.iter() {
-            for d in 0..19 {
+            for d in 0..BEHAVIOUR_DIMS {
                 within += (data[i][d] - gm[d]).powi(2);
                 total += (data[i][d] - mean[d]).powi(2);
             }
@@ -412,6 +437,7 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
     let (births, mixed, starved, bitten, burned, old, rained) =
         (d(3), d(4), d(5), d(6), d(7), d(8), d(9));
     let no_slot = d(13);
+    let sun_taken = d(14);
     tracker.last = counters;
     let n = world.alive();
     // Fixed here, so logs from all experiments compare. Genomes drift fast, about 0.03 of
@@ -428,6 +454,16 @@ pub fn report(world: &mut World, tracker: &mut Tracker) -> Value {
         "rained": rained,
         "births_no_slot": no_slot,
     });
+    if world
+        .cfg
+        .physics
+        .get("plants_meter")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        // Sampled one tick in 256 at 256 counts per unit: over ticks in a log step, it's sun per tick.
+        out["sun_taken"] = json!(sun_taken);
+    }
     if cells.len() < 10 {
         return out;
     }
@@ -628,4 +664,68 @@ impl Palette {
         ]);
         bytemuck::cast_slice(&v).to_vec()
     }
+}
+
+/// Writes a sample of living cells and a map of who is where, for studying a run over time.
+pub fn dump(world: &mut World, path: &str, want: usize) -> Result<(), String> {
+    use std::io::Write;
+    world.flush();
+    let slots = world.cfg.slots as u64;
+    let alive = world.alive().max(1) as u64;
+    let genome_bytes = world.cfg.blocks() as u64 * 16;
+    let need = (want as u64 * slots / alive).min(slots).min(80_000);
+    const RUN: u64 = 8;
+    let runs = need.div_ceil(RUN).max(1);
+    let gap = (slots / runs).max(1);
+    let len = RUN.min(slots);
+    let starts: Vec<u64> = (0..runs)
+        .map(|k| (k * gap).min(slots.saturating_sub(len)))
+        .collect();
+    let of = |stride: u64| -> Vec<(u64, u64)> {
+        starts.iter().map(|s| (s * stride, len * stride)).collect()
+    };
+    let cell = world.read_ranges("cell", &of(CELL_BYTES));
+    let stat = world.read_ranges("stat", &of(STAT_BYTES));
+    let run_list: Vec<(u64, u64)> = starts.iter().map(|s| (*s, len)).collect();
+    let genome = world.read_genomes(&run_list, genome_bytes);
+    let size = world.cfg.size as usize;
+    let occ = world.read_u32s("occ");
+    let mut map = vec![0u8; size * size / 8 + 1];
+    for (p, o) in occ.iter().enumerate() {
+        if *o != 0 && *o != u32::MAX {
+            map[p / 8] |= 1 << (p % 8);
+        }
+    }
+    let mut f = std::io::BufWriter::new(std::fs::File::create(path).map_err(|e| e.to_string())?);
+    let mut kept = vec![];
+    for i in 0..starts.len() * len as usize {
+        let c = &cell[i * CELL_BYTES as usize..(i + 1) * CELL_BYTES as usize];
+        let e = f32::from_le_bytes(c[0..4].try_into().unwrap());
+        let age = f32::from_le_bytes(c[8..12].try_into().unwrap());
+        if e > 0.0 && age >= 50.0 {
+            kept.push(i);
+        }
+    }
+    let head = json!({"tick": world.tick, "size": size, "alive": alive, "count": kept.len(), "genome_bytes": genome_bytes, "hidden_rows": world.cfg.hidden_rows, "physics": world.cfg.physics, "layout": crate::config::layout_json()}).to_string();
+    let w = |f: &mut std::io::BufWriter<std::fs::File>, b: &[u8]| {
+        f.write_all(b).map_err(|e| e.to_string())
+    };
+    w(&mut f, &(head.len() as u64).to_le_bytes())?;
+    w(&mut f, head.as_bytes())?;
+    w(&mut f, &map)?;
+    for i in kept {
+        w(
+            &mut f,
+            &cell[i * CELL_BYTES as usize..(i + 1) * CELL_BYTES as usize],
+        )?;
+        w(
+            &mut f,
+            &stat[i * STAT_BYTES as usize..(i + 1) * STAT_BYTES as usize],
+        )?;
+        w(
+            &mut f,
+            &genome[i * genome_bytes as usize..(i + 1) * genome_bytes as usize],
+        )?;
+    }
+    Ok(())
 }

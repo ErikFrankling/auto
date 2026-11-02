@@ -13,10 +13,23 @@ pub struct Var {
     pub range: (f64, f64),
     pub log: bool,
     pub whole: bool,
+    /// The smallest step above zero a slider with a log scale goes to.
+    pub smallest: f64,
     pub help: &'static str,
 }
 
-pub const GROUPS: [&str; 10] = [
+pub const GROUPS: [&str; 21] = [
+    "Body mass",
+    "Armour",
+    "Pack hunting",
+    "Waste",
+    "Living plants",
+    "Weather",
+    "Learning by doing",
+    "Biomes and walls",
+    "Blooms",
+    "Roads",
+    "Mating",
     "Sun and ground",
     "Rain and genes",
     "Body and upkeep",
@@ -25,17 +38,38 @@ pub const GROUPS: [&str; 10] = [
     "Scent and noise",
     "What's switched on",
     "How fields spread",
-    "Senses and mating",
+    "Senses",
     "Other",
 ];
 
 fn group_of(key: &str) -> &'static str {
     match key {
+        k if k.starts_with("mass_") => "Body mass",
+        k if k.starts_with("armour_") => "Armour",
+        k if k.starts_with("pack_") => "Pack hunting",
+        k if k.starts_with("waste_") => "Waste",
+        k if k.starts_with("plants_") => "Living plants",
+        k if k.starts_with("weather_") => "Weather",
+        k if k.starts_with("skill_") => "Learning by doing",
+        k if k.starts_with("biome")
+            || k.starts_with("wall")
+            || k.starts_with("tempo_")
+            || k.starts_with("sunx_")
+            || k.starts_with("drag_")
+            || k.starts_with("rotx_") =>
+        {
+            "Biomes and walls"
+        }
+        k if k.starts_with("bloom_") => "Blooms",
+        k if k.starts_with("road") || k.starts_with("track_") => "Roads",
+        k if k.starts_with("mate_") || k == "compat" => "Mating",
         k if k.ends_with("_on") => "What's switched on",
         k if k.ends_with("_flow") || k.ends_with("_decay") || k.ends_with("_rot") => {
             "How fields spread"
         }
-        "sun" | "season_ticks" | "ground_cap" | "rock" => "Sun and ground",
+        "sun" | "season_ticks" | "ground_cap" | "rock" | "terrain_style" | "terrain_contrast" => {
+            "Sun and ground"
+        }
         k if k.starts_with("rain_") || k.starts_with("mut_") || k.starts_with("gene_") => {
             "Rain and genes"
         }
@@ -52,7 +86,7 @@ fn group_of(key: &str) -> &'static str {
             "Fighting and helping"
         }
         "emit_power" | "noise_power" => "Scent and noise",
-        "vision_steps" | "compat" => "Senses and mating",
+        "vision_steps" => "Senses",
         _ => "Other",
     }
 }
@@ -102,6 +136,27 @@ fn help_of(key: &str) -> &'static str {
         "compat" => "Mates need genomes this close. 0 means anyone can mate.",
         "report_tau" => "How close two genomes count as similar, for measuring only.",
         "ledger" => "Keep an exact energy count, for checking the physics. Slower.",
+        "mass_on" => {
+            "Stored energy weighs a cell down: it costs more to move and it pushes harder."
+        }
+        "armour_on" => "Cells can spend on armour, which resists bites and slows them.",
+        "pack_on" => "Bites leave wounds, so a wounded cell is easier for others to bite.",
+        "waste_on" => "Cells leave waste that harms them, and that can break down or be eaten.",
+        "waste_clean" => "Cells can spend on cleaning up waste. Needs waste_on.",
+        "plants_on" => "Ground food grows from what's already there, and spreads.",
+        "weather_sun_on" => "The sun map slowly slides across the world.",
+        "weather_fire_on" => "Thick ground food can catch fire, and fire spreads.",
+        "mate_pay" => "Energy a cell pays to mate.",
+        "mate_track" => "Keep count of children had by mating, for measuring.",
+        "skill_on" => "Cells get better at grazing and eating bodies by doing them.",
+        "skill_sense" => "Cells can sense their own practice.",
+        "biomes_on" => "Places differ: cold, hot, swamp and barren.",
+        "biome_feel" => "Cells can feel what kind of place they are in.",
+        "walls_on" => "Walls divide the world into rooms, with gaps to pass through.",
+        "roads_on" => "Moving wears tracks that make walking there cheaper.",
+        "bloom_share" => "Share of the sun that arrives as occasional blooms instead of evenly.",
+        "terrain_style" => "How the land is laid out.",
+        "terrain_contrast" => "How much rich and poor land differ.",
         _ => "",
     }
 }
@@ -109,6 +164,9 @@ fn help_of(key: &str) -> &'static str {
 fn range_of(key: &str, default: f64) -> (f64, f64, bool, bool) {
     if key.ends_with("_ticks") {
         return (0.0, (default * 8.0).max(10000.0), false, true);
+    }
+    if key.ends_with("_style") || key == "ledger_scale" {
+        return (0.0, (default * 4.0).max(6.0), false, true);
     }
     if key.ends_with("_steps") {
         return (0.0, 6.0, false, true);
@@ -128,6 +186,9 @@ fn range_of(key: &str, default: f64) -> (f64, f64, bool, bool) {
     }
     if default <= 0.0 {
         return (0.0, 1.0, false, false);
+    }
+    if default < 1e-3 {
+        return (0.0, default * 40.0, true, false);
     }
     (0.0, default * 5.0, default < 0.1, false)
 }
@@ -157,6 +218,7 @@ pub fn all_vars(cfg: &Config, world: &Map<String, Value>) -> Vec<Var> {
             range: (lo, hi),
             log,
             whole,
+            smallest: if d > 0.0 { (d / 100.0).min(1e-3) } else { 1e-3 },
             help: help_of(&key),
             key,
         });

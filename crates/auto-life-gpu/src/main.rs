@@ -89,6 +89,11 @@ struct Args {
     /// Also write one every this many ticks, with the tick in its name.
     #[arg(long, default_value_t = 0)]
     snapshot_every: u64,
+    /// Every this many ticks, write a sample of cells to --dump-dir, for studying a run over time.
+    #[arg(long, default_value_t = 0)]
+    dump_every: u64,
+    #[arg(long)]
+    dump_dir: Option<String>,
 }
 
 fn main() {
@@ -219,6 +224,14 @@ fn run(args: Args) -> Result<(), String> {
             && t % args.frame_every == 0
         {
             rec.frame(&mut world);
+        }
+        if let Some(dir) = &args.dump_dir
+            && args.dump_every > 0
+            && t % args.dump_every == 0
+        {
+            let _ = std::fs::create_dir_all(dir);
+            let path = format!("{dir}/t{:09}.bin", world.tick);
+            auto_life_gpu::report::dump(&mut world, &path, 2500)?;
         }
         if let Some(path) = &args.snapshot
             && args.snapshot_every > 0

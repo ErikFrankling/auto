@@ -23,7 +23,9 @@ fn color(x: u32, y: u32) -> vec3f {
     let m = min(a.y / 3.0, 1.0);
     let heat = min(a.z / 2.0, 1.0);
     let scent = min((b.x + b.y + b.z + b.w) / 4.0, 1.0);
-    return vec3f(0.04 + m * 0.27 + heat * 0.78, 0.047 + g * 0.15 + heat * 0.35, 0.063 + scent * 0.17 + g * 0.03);
+    var ground = vec3f(0.04 + m * 0.27 + heat * 0.78, 0.047 + g * 0.15 + heat * 0.35, 0.063 + scent * 0.17 + g * 0.03);
+    if (BLOOM_SHARE > 0.0) { ground += vec3f(0.8, 0.7, 0.0) * min(max(a.x - GROUND_CAP, 0.0) / 20.0, 1.0); }
+    return ground;
 }
 
 @compute @workgroup_size(16, 16)

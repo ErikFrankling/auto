@@ -57,7 +57,10 @@ fn params(cell: &str, field: &str) -> ViewParams {
         season: 0.0,
         season_on: 0.0,
         ground_cap: 4.0,
-        pad: [0.0; 2],
+        sun_keep: 1.0,
+        pad0: 0.0,
+        drift: [0.0; 2],
+        pad1: [0.0; 2],
     }
 }
 
@@ -304,4 +307,20 @@ fn a_world_too_big_for_the_device_is_known_beforehand() {
     cfg.slots = cfg.slots_within(limit);
     assert!(cfg.check_buffers(limit).is_ok());
     assert!(cfg.check_buffers(cfg.slots as u64 * genome - 1).is_err());
+}
+
+#[test]
+fn a_save_from_an_older_layout_is_refused_with_a_clear_reason() {
+    use auto_life_gpu::config::read_save_head;
+    // A header as the old engine wrote it, followed by nothing it could use.
+    let path = std::env::temp_dir().join(format!("explore-old-{}.bin", std::process::id()));
+    let head = br#"{"size":512,"slots":131072,"hidden_rows":2,"seed":1,"tick":5,"physics":{}}"#;
+    let mut file = (head.len() as u64).to_le_bytes().to_vec();
+    file.extend_from_slice(head);
+    std::fs::write(&path, &file).unwrap();
+    let path = path.to_string_lossy().to_string();
+    assert!(read_save_head(&path).is_ok());
+    let why = Config::from_save(&path, None).err().unwrap();
+    assert!(why.contains("older layout"), "{why}");
+    std::fs::remove_file(&path).unwrap();
 }

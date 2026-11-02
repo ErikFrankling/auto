@@ -86,9 +86,6 @@ pub fn hue(h: f32, s: f32, v: f32) -> [f32; 3] {
 }
 
 const YES_NO: Paint = Paint::Kinds(&[("yes", [1.0, 0.86, 0.2]), ("no", [0.16, 0.18, 0.26])]);
-pub const ACTIONS: [&str; 10] = [
-    "rest", "move", "ground", "meat", "grow", "emit", "heat", "bite", "give", "enzyme",
-];
 const MAIN_ACTION: Paint = Paint::Kinds(&[
     ("rest", [0.45, 0.47, 0.55]),
     ("move", [0.95, 0.95, 0.95]),
@@ -100,6 +97,8 @@ const MAIN_ACTION: Paint = Paint::Kinds(&[
     ("bite", [0.60, 0.05, 0.10]),
     ("give", [0.65, 0.40, 1.00]),
     ("enzyme", [1.00, 0.90, 0.20]),
+    ("armour", [0.55, 0.80, 0.85]),
+    ("clean waste", [0.55, 0.40, 0.20]),
 ]);
 
 fn share(d: &[f32; 4], k: usize) -> f32 {
@@ -313,6 +312,54 @@ pub const CELL_VIEWS: &[CellView] = &[
         |c| c.budget[9]
     ),
     scale!(
+        "Armour",
+        "Spends on",
+        "Share of budget spent building armour. Needs armour_on.",
+        "stat[s].b2.z",
+        (0.0, 1.0),
+        |c| c.budget[10]
+    ),
+    scale!(
+        "Clean waste",
+        "Spends on",
+        "Share of budget spent cleaning up waste. Needs waste_clean.",
+        "stat[s].b2.w",
+        (0.0, 1.0),
+        |c| c.budget[11]
+    ),
+    scale!(
+        "Spare action x0",
+        "Spends on",
+        "Share of budget on spare action x0. Needs x0_on.",
+        "stat[s].b3.x",
+        (0.0, 1.0),
+        |c| c.budget[12]
+    ),
+    scale!(
+        "Spare action x1",
+        "Spends on",
+        "Share of budget on spare action x1. Needs x1_on.",
+        "stat[s].b3.y",
+        (0.0, 1.0),
+        |c| c.budget[13]
+    ),
+    scale!(
+        "Spare action x2",
+        "Spends on",
+        "Share of budget on spare action x2. Needs x2_on.",
+        "stat[s].b3.z",
+        (0.0, 1.0),
+        |c| c.budget[14]
+    ),
+    scale!(
+        "Spare action x3",
+        "Spends on",
+        "Share of budget on spare action x3. Needs x3_on.",
+        "stat[s].b3.w",
+        (0.0, 1.0),
+        |c| c.budget[15]
+    ),
+    scale!(
         "Energy",
         "Body",
         "Energy stored.",
@@ -343,6 +390,94 @@ pub const CELL_VIEWS: &[CellView] = &[
         "cell[s].hit",
         (0.0, 5.0),
         |c| c.hit
+    ),
+    scale!(
+        "Armour built",
+        "Rules",
+        "How hard its armour is. Needs armour_on.",
+        "cell[s].hard",
+        (0.0, 1.0),
+        |c| c.x[0]
+    ),
+    scale!(
+        "Wound",
+        "Rules",
+        "How wounded it is, which pack hunters can exploit. Needs pack_on.",
+        "cell[s].wound",
+        (0.0, 1.0),
+        |c| c.x[1]
+    ),
+    scale!(
+        "Practice at grazing",
+        "Rules",
+        "How practised it is at eating ground food. Needs skill_on.",
+        "cell[s].skill_g",
+        (0.0, 1.0),
+        |c| c.x[2]
+    ),
+    scale!(
+        "Practice at flesh",
+        "Rules",
+        "How practised it is at eating bodies. Needs skill_on.",
+        "cell[s].skill_f",
+        (0.0, 1.0),
+        |c| c.x[3]
+    ),
+    scale!(
+        "Place feels costly",
+        "Rules",
+        "How much upkeep this place costs it, as it feels it. Needs biomes_on and biome_feel.",
+        "cell[s].feel_u",
+        (0.0, 1.0),
+        |c| c.feel[0]
+    ),
+    scale!(
+        "Place feels slow",
+        "Rules",
+        "How much this place drags at it, as it feels it. Needs biomes_on and biome_feel.",
+        "cell[s].feel_d",
+        (0.0, 1.0),
+        |c| c.feel[1]
+    ),
+    scale!(
+        "Children by mating",
+        "Rules",
+        "How many children it has had with a mate. Needs mate_track.",
+        "cell[s].mate_kids",
+        (0.0, 8.0),
+        |c| c.mate_kids
+    ),
+    scale!(
+        "Experiment word x0",
+        "Rules",
+        "A word free for experiments.",
+        "cell[s].x0",
+        (0.0, 1.0),
+        |c| c.spare[0]
+    ),
+    scale!(
+        "Experiment word x1",
+        "Rules",
+        "A word free for experiments.",
+        "cell[s].x1",
+        (0.0, 1.0),
+        |c| c.spare[1]
+    ),
+    scale!(
+        "Experiment word x2",
+        "Rules",
+        "A word free for experiments.",
+        "cell[s].x2",
+        (0.0, 1.0),
+        |c| c.spare[2]
+    ),
+    scale!(
+        "Experiment word x3",
+        "Rules",
+        "A word free for experiments.",
+        "cell[s].x3",
+        (0.0, 1.0),
+        |c| c.spare[3]
     ),
     sides!(
         "Signal 1",
@@ -494,7 +629,8 @@ pub const CELL_VIEWS: &[CellView] = &[
 /// Which number in `ViewParams::hi` a field's range is.
 pub const HI_SUN: usize = 12;
 pub const HI_BASE: usize = 13;
-pub const HI_COUNT: usize = 14;
+pub const HI_TRACKS: usize = 14;
+pub const HI_COUNT: usize = 15;
 
 pub struct FieldView {
     pub name: &'static str,
@@ -648,7 +784,7 @@ pub const FIELD_VIEWS: &[FieldView] = &[
         "Sun now",
         "Food",
         "How fast ground food grows here at this point in the seasons.",
-        "sun_now(terrain[p])",
+        "sun_now(p)",
         "3].x",
         1.0,
         0.9,
@@ -689,29 +825,48 @@ pub const FIELD_VIEWS: &[FieldView] = &[
         3
     ),
     field!(
-        "Experiment channel y",
-        "Experiments",
-        "Free field channel, unused unless the physics uses it.",
+        "Waste",
+        "Rules",
+        "What cells leave behind, harmful until it breaks down. Needs waste_on.",
         "fc[p].y",
         "2].y",
-        0.4,
-        0.95,
-        0.95,
+        0.65,
+        0.5,
+        0.2,
         9
     ),
     field!(
-        "Experiment channel z",
-        "Experiments",
-        "Free field channel, unused unless the physics uses it.",
-        "fc[p].z",
+        "Fire",
+        "Rules",
+        "Squares alight. A square that has just burned can't light again for a while. Needs weather_fire_on.",
+        "max(fc[p].z, 0.0)",
         "2].z",
-        0.95,
-        0.6,
-        0.8,
+        1.0,
+        0.45,
+        0.05,
         10
     ),
     field!(
-        "Experiment channel w",
+        "Tracks",
+        "Rules",
+        "Worn paths, which are cheaper to walk. Needs roads_on.",
+        "fd[p].x",
+        "3].z",
+        0.9,
+        0.85,
+        0.7,
+        HI_TRACKS
+    ),
+    FieldView {
+        name: "Kind of place",
+        group: "Rules",
+        help: "Cold, hot, swamp or barren. Only means something with walls_on or biomes_on.",
+        wgsl: "return place_tint(terrain[p]) * 0.7;",
+        tint: None,
+        hi: None,
+    },
+    field!(
+        "Experiment channel fc.w",
         "Experiments",
         "Free field channel, unused unless the physics uses it.",
         "fc[p].w",
@@ -767,7 +922,12 @@ pub struct ViewParams {
     pub season: f32,
     pub season_on: f32,
     pub ground_cap: f32,
-    pub pad: [f32; 2],
+    /// Share of the sun that isn't going into blooms.
+    pub sun_keep: f32,
+    pub pad0: f32,
+    /// How far moving weather has slid the sun map, in squares.
+    pub drift: [f32; 2],
+    pub pad1: [f32; 2],
 }
 
 const STRIDE: u64 = 256;
@@ -829,6 +989,7 @@ impl ViewPipe {
                 ("fa", Access2::Read),
                 ("fb", Access2::Read),
                 ("fc", Access2::Read),
+                ("fd", Access2::Read),
                 ("ctr", Access2::ReadWrite),
             ],
             Some(layout),

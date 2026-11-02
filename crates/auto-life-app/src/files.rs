@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use auto_life_gpu::config::read_save_head;
+use auto_life_gpu::config::{check_layout, read_save_head};
 use egui::{Color32, RichText, Ui};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -19,6 +19,8 @@ pub struct Entry {
     pub is_dir: bool,
     /// Width, tick and size in GB, if it's a saved world.
     pub info: Option<(u64, u64, f64)>,
+    /// Whether this build can read it.
+    pub current: bool,
 }
 
 pub struct Browser {
@@ -39,11 +41,13 @@ fn scan(dir: &Path) -> Result<Vec<Entry>, String> {
         }
         let is_dir = path.is_dir();
         let mut info = None;
+        let mut current = false;
         if !is_dir {
             if !name.ends_with(".bin") {
                 continue;
             }
             if let Ok(head) = read_save_head(&path.to_string_lossy()) {
+                current = check_layout(&head, &name).is_ok();
                 let bytes = item.metadata().map_or(0, |m| m.len());
                 info = Some((
                     head["size"].as_u64().unwrap_or(0),
@@ -57,6 +61,7 @@ fn scan(dir: &Path) -> Result<Vec<Entry>, String> {
             name,
             is_dir,
             info,
+            current,
         });
     }
     out.sort_by(|a, b| (!a.is_dir, &a.name).cmp(&(!b.is_dir, &b.name)));
@@ -135,8 +140,11 @@ impl Browser {
                         format!("{}/", e.name)
                     } else {
                         match e.info {
-                            Some((w, t, gb)) => {
+                            Some((w, t, gb)) if e.current => {
                                 format!("{}    {w} wide, tick {t}, {gb:.2} GB", e.name)
+                            }
+                            Some((w, t, _)) => {
+                                format!("{}    {w} wide, tick {t}, older version", e.name)
                             }
                             None => format!("{}    not a saved world", e.name),
                         }

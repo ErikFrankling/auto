@@ -64,32 +64,46 @@ struct App {
     running: Option<Running>,
 }
 
-/// What to open with. An evolved world if there's one that fits, so there's life at once.
+/// What to open with. An evolved world if there's one this build can read and that
+/// fits, so there's life at once, or else a new one.
 fn first_world(args: &Args, gpu: &Gpu) -> Result<Cmd, String> {
-    if let Some(path) = &args.load {
-        return Ok(Cmd::Load(path.clone()));
-    }
-    let fits = |bytes: u64| match free_vram() {
-        Some(free) if !gpu.name().to_lowercase().contains("llvmpipe") => {
-            bytes + VRAM_MARGIN <= free
-        }
-        _ => true,
-    };
-    if args.size.is_none() {
-        for name in ["v2-512-seed1.bin", "v2-512-seed2.bin", "base-512-seed1.bin"] {
-            let path = format!("{SAVES_DIR}/{name}");
-            if let Ok(cfg) = Config::from_save(&path, args.shaders.clone())
-                && fits(cfg.vram_bytes())
-                && cfg.check_buffers(sim::buffer_limit(gpu)).is_ok()
-            {
-                return Ok(Cmd::Load(path));
+    let fits = |cfg: &Config| {
+        let room = match free_vram() {
+            Some(free) if !gpu.name().to_lowercase().contains("llvmpipe") => {
+                cfg.vram_bytes() + VRAM_MARGIN <= free
             }
+            _ => true,
+        };
+        room && cfg.check_buffers(sim::buffer_limit(gpu)).is_ok()
+    };
+    let mut note = None;
+    if let Some(path) = &args.load {
+        match Config::from_save(path, args.shaders.clone()) {
+            Ok(_) => return Ok(Cmd::Load(path.clone())),
+            // Still open with something happening, and say why it's not that file.
+            Err(why) => note = Some(format!("{why}. Started a new world instead.")),
+        }
+    }
+    if args.size.is_none() && note.is_none() {
+        let newest = std::fs::read_dir(SAVES_DIR)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path().to_string_lossy().to_string();
+                let cfg = Config::from_save(&path, args.shaders.clone()).ok()?;
+                let when = entry.metadata().ok()?.modified().ok()?;
+                (cfg.size <= 1024 && fits(&cfg)).then_some((when, path))
+            })
+            .max();
+        if let Some((_, path)) = newest {
+            return Ok(Cmd::Load(path));
         }
     }
     let mut size = args.size.unwrap_or(512);
     loop {
         let cfg = Config::new(size, args.seed, args.shaders.clone())?;
-        if fits(cfg.vram_bytes()) || size <= 256 {
+        if fits(&cfg) || size <= 256 {
             return Ok(Cmd::New(Box::new(NewWorld {
                 size,
                 seed: args.seed,
@@ -98,6 +112,7 @@ fn first_world(args: &Args, gpu: &Gpu) -> Result<Cmd, String> {
                 physics: cfg.physics,
                 seed_from: vec![],
                 seed_keep: 1.0,
+                note,
             })));
         }
         size /= 2;

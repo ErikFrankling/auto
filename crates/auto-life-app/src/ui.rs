@@ -10,9 +10,10 @@ use std::time::Instant;
 use auto_core::Gpu;
 use auto_life_gpu::config::{Scope, cell, stat};
 use auto_life_gpu::explore::{
-    self, ACTIONS, CELL_VIEWS, Canvas, FIELD_VIEWS, HI_BASE, HI_SUN, Paint, SCENT_TINT, SHOW_CELLS,
-    SHOW_FOUNDER, SHOW_SIMILAR, ViewParams,
+    self, CELL_VIEWS, Canvas, FIELD_VIEWS, HI_BASE, HI_SUN, HI_TRACKS, Paint, SCENT_TINT,
+    SHOW_CELLS, SHOW_FOUNDER, SHOW_SIMILAR, ViewParams,
 };
+use auto_life_gpu::report::ACTIONS;
 use auto_life_gpu::{Config, VRAM_MARGIN, free_vram};
 use egui::{
     Align, Align2, Color32, Context, CornerRadius, Event, Frame, Key, Layout, Margin, ProgressBar,
@@ -129,6 +130,8 @@ pub struct Ui {
     cy: f64,
     scale: f64,
     fit_next: bool,
+    /// The view still shows the whole world, so it should keep doing so when the window changes.
+    fitted: bool,
     follow: bool,
     world_id: u64,
 
@@ -213,6 +216,7 @@ impl Ui {
             cy: 0.0,
             scale: 1.0,
             fit_next: true,
+            fitted: true,
             follow: false,
             world_id: 0,
             cell_mode: 0,
@@ -803,6 +807,9 @@ impl Ui {
                     ui.end_row();
                 }
                 row_of(ui, "Enzyme", p.fc[0]);
+                row_of(ui, "Waste", p.fc[1]);
+                row_of(ui, "Fire", p.fc[2]);
+                row_of(ui, "Tracks", p.fd[0]);
             });
     }
 
@@ -826,6 +833,20 @@ impl Ui {
                 line("Generation", format!("{}", p.cell[cell::GEN]));
                 line("Founder line", format!("{:08x}", p.cell[cell::CLADE]));
                 line("Recent damage", legend::number(f(cell::HIT)));
+                // What the rules that are on keep on each cell.
+                for (key, name, at) in [
+                    ("armour_on", "Armour", cell::HARD),
+                    ("pack_on", "Wound", cell::WOUND),
+                    ("skill_on", "Practice grazing", cell::SKILL_G),
+                    ("skill_on", "Practice at flesh", cell::SKILL_F),
+                    ("biomes_on", "Place feels costly", cell::FEEL_U),
+                    ("biomes_on", "Place feels slow", cell::FEEL_D),
+                    ("mate_track", "Children by mating", cell::MATE_KIDS),
+                ] {
+                    if self.st.physics.get(key) == Some(&Value::Bool(true)) {
+                        line(name, legend::number(f(at)));
+                    }
+                }
                 line(
                     "Facing",
                     DIRECTION[(flags & cell::DIR_MASK) as usize].to_string(),
@@ -867,12 +888,15 @@ impl Ui {
             ui.small("It is young, so these readings are still building up.");
         }
         for (k, name) in ACTIONS.iter().enumerate() {
-            bar(
-                ui,
-                name,
-                p.stat[stat::BUDGET + k],
-                Color32::from_rgb(0x8a, 0x93, 0xa8),
-            );
+            // Armour, cleaning and the spare actions only appear while they're in use.
+            let share = if k < 12 {
+                p.stat[stat::BUDGET + k]
+            } else {
+                p.stat[stat::SPARE + k - 12]
+            };
+            if k < 10 || share > 0.001 {
+                bar(ui, name, share, Color32::from_rgb(0x8a, 0x93, 0xa8));
+            }
         }
         ui.add_space(6.0);
         ui.strong("When it moves");
@@ -941,7 +965,7 @@ impl Ui {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for group in GROUPS {
-                    let in_group: Vec<&Var> = self
+                    let mut in_group: Vec<&Var> = self
                         .vars
                         .iter()
                         .filter(|v| v.group == group)
@@ -950,6 +974,7 @@ impl Ui {
                     if in_group.is_empty() {
                         continue;
                     }
+                    in_group.sort_by_key(|v| !v.key.ends_with("_on"));
                     egui::CollapsingHeader::new(RichText::new(group).strong())
                         .default_open(true)
                         .show(ui, |ui| {
@@ -1001,6 +1026,7 @@ impl Ui {
         }
         hi[12] = h[HI_SUN] / b;
         hi[13] = h[HI_BASE] / b;
+        hi[14] = h[HI_TRACKS] / b;
         ViewParams {
             origin: [
                 (self.cx - width as f64 * 0.5 * self.scale) as f32,
@@ -1026,7 +1052,10 @@ impl Ui {
             season: self.st.season,
             season_on: self.st.season_on as u32 as f32,
             ground_cap: self.st.ground_cap.max(1e-3),
-            pad: [0.0, 0.0],
+            sun_keep: self.st.sun_keep,
+            pad0: 0.0,
+            drift: self.st.drift,
+            pad1: [0.0, 0.0],
         }
     }
 
@@ -1062,6 +1091,9 @@ impl Ui {
             }
             self.canvas = Some(canvas);
             self.drawn = None;
+            if self.fitted {
+                self.fit_next = true;
+            }
         }
 
         let size = self.st.size as f64;
@@ -1072,6 +1104,7 @@ impl Ui {
                 self.cy = size / 2.0;
                 self.scale = fit;
                 self.fit_next = false;
+                self.fitted = true;
             }
             self.camera(ui, &response, rect, ppp, fit);
             let params = self.view_params(width, height);
@@ -1145,6 +1178,7 @@ impl Ui {
                             self.cx -= step.x as f64 * ppp * self.scale;
                             self.cy -= step.y as f64 * ppp * self.scale;
                             self.follow = false;
+                            self.fitted = false;
                         }
                     }
                 }
@@ -1171,6 +1205,7 @@ impl Ui {
                 self.cx += off_x * (self.scale - new);
                 self.cy += off_y * (self.scale - new);
                 self.scale = new;
+                self.fitted = false;
             }
         }
         if self.follow
@@ -1485,6 +1520,7 @@ impl Ui {
                 physics,
                 seed_from: self.new.seeds.clone(),
                 seed_keep: self.new.seed_keep,
+                note: None,
             })));
             self.new.open = false;
             self.drawn = None;
@@ -1776,7 +1812,7 @@ fn var_row(ui: &mut Ui2, v: &Var, edits: &mut Map<String, Value>, slider_width: 
                 let mut slider = Slider::new(&mut value, v.range.0..=v.range.1)
                     .clamping(egui::SliderClamping::Never);
                 if v.log {
-                    slider = slider.logarithmic(true).smallest_positive(1e-6);
+                    slider = slider.logarithmic(true).smallest_positive(v.smallest);
                 }
                 if v.whole {
                     slider = slider.integer();

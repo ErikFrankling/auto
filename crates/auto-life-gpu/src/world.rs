@@ -14,15 +14,20 @@ use std::time::{Duration, Instant};
 use auto_core::{Gpu, GpuOptions};
 use bytemuck::{Pod, Zeroable};
 
-use crate::config::{CELL_BYTES, Config, SKETCH_BYTES, STAT_BYTES, cell as fields};
+use crate::config::{
+    CELL_BYTES, CELL_WORDS, Config, SKETCH_BYTES, STAT_BYTES, cell as fields, check_layout,
+    layout_json,
+};
 
 const RING_ENTRIES: usize = 4096;
 const WGSL_STRUCTS: &str = r#"
 struct Cell {
     e: f32, womb: f32, age: f32, hit: f32,
-    x0: f32, x1: f32, x2: f32, x3: f32,
+    hard: f32, wound: f32, skill_g: f32, skill_f: f32,
     voice: vec2f, pos: u32, flags: u32,
     clade: u32, gen: u32, rgb: u32, stamp: u32,
+    feel_u: f32, feel_d: f32, mate_near: f32, mate_kids: f32,
+    x0: f32, x1: f32, x2: f32, x3: f32,
 }
 struct Stat {
     diet: vec4f,
@@ -30,6 +35,8 @@ struct Stat {
     chase: vec4f,
     follow: vec4f,
     misc: vec4f,
+    b3: vec4f,
+    measures: vec4f,
 }
 struct Frame {
     tick: u32, px: u32, py: u32, row0: u32,
@@ -213,6 +220,7 @@ impl World {
             ("fa", "vec4f", squares * 16, copy),
             ("fb", "vec4f", squares * 16, copy),
             ("fc", "vec4f", squares * 16, copy),
+            ("fd", "vec4f", squares * 16, copy),
             ("cell", "Cell", slots * CELL_BYTES, copy),
             ("stat", "Stat", slots * STAT_BYTES, copy),
             ("sketch", "vec4u", slots * SKETCH_BYTES, copy),
@@ -460,6 +468,7 @@ impl World {
             ("fa", RW),
             ("fb", RW),
             ("fc", RW),
+            ("fd", RW),
             ("ring", RW),
             ("cell", RW),
             ("ctr", RW),
@@ -924,7 +933,7 @@ impl World {
         let head = serde_json::json!({
             "size": self.cfg.size, "slots": self.cfg.slots, "shard_slots": self.cfg.shard_slots, "hidden_rows": self.cfg.hidden_rows,
             "seed": self.cfg.seed, "tick": self.tick, "rng": self.rng, "sun_k": self.sun_k, "open": self.open,
-            "start_ground": self.start_ground, "physics": self.cfg.physics,
+            "start_ground": self.start_ground, "physics": self.cfg.physics, "layout": layout_json(),
         })
         .to_string();
         f.write_all(&(head.len() as u64).to_le_bytes())
@@ -961,6 +970,7 @@ impl World {
         let mut head = vec![0u8; u64::from_le_bytes(len) as usize];
         f.read_exact(&mut head).map_err(|e| e.to_string())?;
         let head: serde_json::Value = serde_json::from_slice(&head).map_err(|e| e.to_string())?;
+        check_layout(&head, path)?;
         let shard = head["shard_slots"]
             .as_u64()
             .unwrap_or(self.cfg.max_shard_slots() as u64);
@@ -1008,7 +1018,7 @@ impl World {
     }
 }
 
-const SAVED: [&str; 16] = [
+const SAVED: [&str; 17] = [
     "occ",
     "seen",
     "seen_next",
@@ -1016,6 +1026,7 @@ const SAVED: [&str; 16] = [
     "fa",
     "fb",
     "fc",
+    "fd",
     "cell",
     "stat",
     "sketch",
@@ -1085,9 +1096,11 @@ fn build_sim_pipes(
                 ("occ", RW),
                 ("seen", R),
                 ("seen_next", RW),
+                ("terrain", R),
                 ("fa", RW),
                 ("fb", RW),
                 ("fc", RW),
+                ("fd", RW),
                 ("cell", RW),
                 ("stat", RW),
                 ("sketch", R),
@@ -1118,6 +1131,7 @@ fn build_sim_pipes(
                 ("fa", RW),
                 ("fb", RW),
                 ("fc", RW),
+                ("fd", RW),
                 ("ctr", RW),
             ],
         )?,
@@ -1314,7 +1328,7 @@ impl World {
         let p = ((y << self.cfg.size.trailing_zeros()) | x) as u64;
         let q = &self.gpu.queue;
         q.write_buffer(&self.buffers["ctr"], 4, bytemuck::bytes_of(&(slot + 1)));
-        let mut cell = vec![0u32; fields::WORDS];
+        let mut cell = [0u32; CELL_WORDS];
         cell[fields::E] = e.to_bits();
         cell[fields::WOMB] = womb.to_bits();
         cell[fields::POS] = p as u32;
@@ -1359,11 +1373,20 @@ impl World {
         bytemuck::cast_slice::<u8, u32>(&b).to_vec()
     }
 
-    /// Every cell slot, as raw 16-word records.
+    /// Every cell slot: the first 16 words of each record, which hold everything but
+    /// the words of a few rules. [`World::read_cells_full`] has those too.
     pub fn read_cells(&self) -> Vec<[u32; 16]> {
+        self.read_cells_full()
+            .iter()
+            .map(|c| c[..16].try_into().unwrap())
+            .collect()
+    }
+
+    /// Every cell slot, as raw whole records.
+    pub fn read_cells_full(&self) -> Vec<[u32; CELL_WORDS]> {
         let b = self.read_ranges("cell", &[(0, self.buffers["cell"].size())]);
         bytemuck::cast_slice::<u8, u32>(&b)
-            .chunks_exact(16)
+            .chunks_exact(CELL_WORDS)
             .map(|c| c.try_into().unwrap())
             .collect()
     }
@@ -1405,7 +1428,7 @@ fn saved_layout(size: u64, slots: u64, hidden_rows: u64, shard: u64) -> Vec<(&'s
         .map(|name| {
             let bytes = match *name {
                 "occ" | "seen" | "seen_next" | "terrain" => squares * 4,
-                "fa" | "fb" | "fc" => squares * 16,
+                "fa" | "fb" | "fc" | "fd" => squares * 16,
                 "cell" => slots * CELL_BYTES,
                 "stat" => slots * STAT_BYTES,
                 "sketch" | "jobs" => slots * SKETCH_BYTES,
@@ -1456,6 +1479,7 @@ impl World {
             f.read_exact(&mut head).map_err(|e| e.to_string())?;
             let head: serde_json::Value =
                 serde_json::from_slice(&head).map_err(|e| e.to_string())?;
+            check_layout(&head, path)?;
             let (src, slots, src_hr) = (
                 head["size"].as_u64().unwrap_or(0),
                 head["slots"].as_u64().unwrap_or(0),
@@ -1539,9 +1563,9 @@ impl World {
                         if slot >= max_slots {
                             break 'outer;
                         }
-                        let bytes = CELL_BYTES as usize;
-                        let mut rec: Vec<u32> = bytemuck::pod_collect_to_vec(
-                            &source.cell[s as usize * bytes..(s as usize + 1) * bytes],
+                        let cell_bytes = CELL_BYTES as usize;
+                        let mut rec: [u32; CELL_WORDS] = bytemuck::pod_read_unaligned(
+                            &source.cell[s as usize * cell_bytes..(s as usize + 1) * cell_bytes],
                         );
                         rec[fields::POS] = p as u32;
                         rec[fields::STAMP] = 0;

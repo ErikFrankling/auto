@@ -10,7 +10,8 @@ struct ViewU {
     hi: array<vec4f, 4>,
     sketch: vec4u,
     center: vec2f, sun_k: f32, season: f32,
-    season_on: f32, ground_cap: f32, pad0: f32, pad1: f32,
+    season_on: f32, ground_cap: f32, sun_keep: f32, pad0: f32,
+    drift: vec2f, pad1: vec2f,
 }
 @group(1) @binding(0) var<uniform> V: ViewU;
 @group(1) @binding(1) var out_tex: texture_storage_2d<rgba8unorm, write>;
@@ -51,9 +52,10 @@ fn founder(c: u32) -> vec3f {
     let h = pcg(c ^ 0x9E3779B9u);
     return hue(unit_f(h), 0.55 + 0.45 * f32((h >> 3u) & 7u) / 7.0, 0.72 + 0.28 * f32((h >> 6u) & 7u) / 7.0);
 }
-const ACTION_TINT = array<vec3f, 10>(
+const ACTION_TINT = array<vec3f, 12>(
     vec3f(0.45, 0.47, 0.55), vec3f(0.95, 0.95, 0.95), vec3f(0.20, 0.80, 0.30), vec3f(0.85, 0.20, 0.25), vec3f(0.95, 0.55, 0.75),
     vec3f(0.30, 0.65, 1.00), vec3f(1.00, 0.55, 0.10), vec3f(0.60, 0.05, 0.10), vec3f(0.65, 0.40, 1.00), vec3f(1.00, 0.90, 0.20),
+    vec3f(0.55, 0.80, 0.85), vec3f(0.55, 0.40, 0.20),
 );
 fn main_action(s: u32) -> vec3f {
     var best = 0u;
@@ -61,8 +63,8 @@ fn main_action(s: u32) -> vec3f {
     let b0 = stat[s].b0;
     let b1 = stat[s].b1;
     let b2 = stat[s].b2;
-    var v = array<f32, 10>(b0.x, b0.y, b0.z, b0.w, b1.x, b1.y, b1.z, b1.w, b2.x, b2.y);
-    for (var k = 0u; k < 10u; k++) {
+    var v = array<f32, 12>(b0.x, b0.y, b0.z, b0.w, b1.x, b1.y, b1.z, b1.w, b2.x, b2.y, b2.z, b2.w);
+    for (var k = 0u; k < 12u; k++) {
         if (v[k] > most) {
             most = v[k];
             best = k;
@@ -97,11 +99,24 @@ fn cell_shown(s: u32) -> vec3f {
     return c;
 }
 fn level(v: f32, hi: f32) -> f32 { return sqrt(clamp(v / max(hi, 1e-6), 0.0, 1.0)); }
-fn sun_now(t: u32) -> f32 {
+// As sun_at in sweep.wgsl. With moving weather, the map has slid by V.drift.
+fn sun_now(p: u32) -> f32 {
+    let x = (p + u32(V.drift.x)) & MASK;
+    let y = ((p >> LOG_W) + u32(V.drift.y)) & MASK;
+    let t = terrain[(y << LOG_W) | x];
     let base = f32(t & 0xFFFFu) / 65535.0 * SUN_RANGE;
     let phase = f32((t >> 16u) & 255u) / 256.0 * 6.2831853;
     let m = select(1.0, 0.55 + 0.45 * sin(phase + V.season), V.season_on > 0.5);
-    return base * V.sun_k * m;
+    return base * V.sun_k * m * V.sun_keep;
+}
+// The kind of place a square is, when walls or biomes are on.
+fn place_tint(t: u32) -> vec3f {
+    switch (place_of_room(t >> 28u)) {
+        case 0u: { return vec3f(0.30, 0.55, 1.00); }
+        case 1u: { return vec3f(1.00, 0.35, 0.20); }
+        case 2u: { return vec3f(0.25, 0.75, 0.40); }
+        default: { return vec3f(0.75, 0.65, 0.40); }
+    }
 }
 // What's on a square under any cell, before the opacity is applied.
 fn field_colour(p: u32) -> vec3f {

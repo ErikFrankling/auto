@@ -29,6 +29,8 @@ pub struct NewWorld {
     pub physics: Map<String, Value>,
     pub seed_from: Vec<String>,
     pub seed_keep: f64,
+    /// Something to say once it's running.
+    pub note: Option<String>,
 }
 
 pub enum Cmd {
@@ -77,6 +79,7 @@ pub struct Picked {
     pub fa: [f32; 4],
     pub fb: [f32; 4],
     pub fc: [f32; 4],
+    pub fd: [f32; 4],
     pub rock: bool,
     /// Rough share of the population within the similarity limit.
     pub similar_share: Option<f32>,
@@ -114,6 +117,8 @@ pub struct Status {
     pub season: f32,
     pub season_on: bool,
     pub ground_cap: f32,
+    pub sun_keep: f32,
+    pub drift: [f32; 2],
 }
 
 pub struct Sim {
@@ -314,6 +319,9 @@ impl Sim {
                         debug(&format!("built it after {:?}", began.elapsed()));
                         self.adopt(result, &mut live, None);
                         debug(&format!("ready after {:?}", began.elapsed()));
+                        if let Some(note) = &spec.note {
+                            self.status.lock().unwrap().message = Some((true, note.clone()));
+                        }
                         if let Some(l) = &live
                             && !spec.seed_from.is_empty()
                             && l.world.alive() >= l.world.cfg.slots
@@ -454,6 +462,13 @@ impl Sim {
                 st.season_on = l.world.cfg.f("season_ticks") > 0.0;
                 st.season = l.world.current_frame().season;
                 st.ground_cap = l.world.cfg.f("ground_cap");
+                st.sun_keep = 1.0 - l.world.cfg.f("bloom_share");
+                st.drift = if l.world.cfg.b("weather_sun_on") {
+                    let x = l.world.tick as f32 * l.world.cfg.f("weather_drift");
+                    [x, x * 0.618034]
+                } else {
+                    [0.0, 0.0]
+                };
                 drop(st);
                 last_publish = Instant::now();
                 (self.repaint)();
@@ -667,10 +682,12 @@ fn read_field_ranges(world: &mut World, hi: &mut [f32; explore::HI_COUNT]) {
     let fa = world.read_ranges("fa", &of(16));
     let fb = world.read_ranges("fb", &of(16));
     let fc = world.read_ranges("fc", &of(16));
+    let fd = world.read_ranges("fd", &of(16));
     let terrain = world.read_ranges("terrain", &of(4));
     let fa: &[f32] = bytemuck::cast_slice(&fa);
     let fb: &[f32] = bytemuck::cast_slice(&fb);
     let fc: &[f32] = bytemuck::cast_slice(&fc);
+    let fd: &[f32] = bytemuck::cast_slice(&fd);
     let t: &[u32] = bytemuck::cast_slice(&terrain);
     let mut update = |k: usize, top: f32| {
         // Quick to rise and slow to fall, so a fading trail doesn't flare up.
@@ -686,6 +703,10 @@ fn read_field_ranges(world: &mut World, hi: &mut [f32; explore::HI_COUNT]) {
         update(4 + k, explore::fit_top(channel(fb)));
         update(8 + k, explore::fit_top(channel(fc)));
     }
+    update(
+        explore::HI_TRACKS,
+        explore::fit_top(fd.iter().step_by(4).copied().collect()),
+    );
     let base: Vec<f32> = t
         .iter()
         .filter(|v| *v & (1 << 24) == 0)
@@ -737,6 +758,7 @@ fn look(world: &World, w: &mut Watch, sample: &[Sample], tau: f32) -> Picked {
         fa: [0.0; 4],
         fb: [0.0; 4],
         fc: [0.0; 4],
+        fd: [0.0; 4],
         rock: false,
         similar_share: None,
     };
@@ -793,6 +815,7 @@ fn look(world: &World, w: &mut Watch, sample: &[Sample], tau: f32) -> Picked {
     out.fa = read4("fa");
     out.fb = read4("fb");
     out.fc = read4("fc");
+    out.fd = read4("fd");
     let t = world.read_ranges("terrain", &[(p * 4, 4)]);
     out.rock = u32::from_le_bytes(t[..4].try_into().unwrap()) & (1 << 24) != 0;
     out

@@ -19,9 +19,10 @@ const C_SUN: u32 = 11u;
 const C_RAIN_E: u32 = 12u;
 // Births that had a free square but no free slot, so the world is at its memory limit.
 const C_NO_SLOT: u32 = 13u;
+// Sun taken up, sampled, when plants_meter is on.
+const C_SUN_TAKEN: u32 = 14u;
 // 16..31 are free for experiments.
 const C_X0: u32 = 16u;
-const LEDGER_SCALE: f32 = 4096.0;
 
 const F_MATE: u32 = 8u;
 const F_SHARE: u32 = 16u;
@@ -43,6 +44,7 @@ fn squash(x: vec4f) -> vec4f {
     let c = clamp(x, vec4f(-3.0), vec4f(3.0));
     return c * (vec4f(27.0) + c * c) / (vec4f(27.0) + 9.0 * c * c);
 }
+fn contrast1(a: f32, b: f32) -> f32 { return (a - b) / (0.05 + a + b); }
 fn maxv(v: vec4f) -> f32 { return max(max(v.x, v.y), max(v.z, v.w)); }
 fn dx8(d: u32) -> i32 { return i32((0x901Au >> (d * 2u)) & 3u) - 1; }
 fn dy8(d: u32) -> i32 { return i32((0x01A9u >> (d * 2u)) & 3u) - 1; }
@@ -58,3 +60,12 @@ fn sq(x: u32, y: u32, dx: i32, dy: i32) -> u32 {
 fn lose(x: f32) {
     if (LEDGER) { atomicAdd(&ctr[C_LOST], u32(x * LEDGER_SCALE + 0.5)); }
 }
+
+// Kinds of place: 0 cold, 1 hot, 2 swamp, 3 barren. When walls or biomes are on, the
+// four biome bits of a terrain word hold the room, 4 rooms by 4, and a room's kind
+// follows from it, so two rooms sharing a wall are always different kinds of place.
+const TEMPO_V = vec4f(TEMPO_COLD, TEMPO_HOT, TEMPO_SWAMP, TEMPO_BARREN);
+const DRAG_V = vec4f(DRAG_COLD, DRAG_HOT, DRAG_SWAMP, DRAG_BARREN);
+const SUNX_V = vec4f(SUNX_COLD, SUNX_HOT, SUNX_SWAMP, SUNX_BARREN);
+const ROTX_V = vec4f(ROTX_COLD, ROTX_HOT, ROTX_SWAMP, ROTX_BARREN);
+fn place_of_room(room: u32) -> u32 { return ((room & 3u) + (room >> 2u)) & 3u; }
