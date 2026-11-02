@@ -792,7 +792,7 @@ impl World {
             return false;
         }
         self.flush();
-        let n = RING_ENTRIES as u32;
+        let n = RING_ENTRIES as u32 / 2;
         let device = &self.gpu.device;
         let bytes = n as u64 * 2 * 8;
         self.profile = Some(Profile {
@@ -1667,5 +1667,28 @@ fn build_pipe(
     Ok(Pipe {
         pipeline,
         groups: [group(0), group(1)],
+    })
+}
+
+/// Reads a saved world's living cells, as a dump, with no GPU.
+pub fn read_saved_cells(path: &str) -> Result<crate::dump::Dump, String> {
+    let mut s = SavedWorld::open(path)?;
+    let head = auto_life_gpu::config::read_save_head(path)?;
+    let to_sq = 1.0 / (1u64 << (32 - (s.size as u32).trailing_zeros())) as f32;
+    let mut cells = vec![];
+    for k in 0..s.slots {
+        let c = s.cell(k);
+        if c.flags & F_ALIVE == 0 {
+            continue;
+        }
+        let plan: Plan = bytemuck::pod_read_unaligned(&s.read("plan", k, PLAN_BYTES as usize)?);
+        let sketch: [u32; 4] = bytemuck::pod_read_unaligned(&s.read("sketch", k, SKETCH_BYTES as usize)?);
+        cells.push(crate::dump::from_records(&c, &plan, sketch, to_sq));
+    }
+    Ok(crate::dump::Dump {
+        tick: head["tick"].as_u64().unwrap_or(0),
+        size: s.size as u32,
+        physics: head["physics"].clone(),
+        cells,
     })
 }
