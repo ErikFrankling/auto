@@ -607,3 +607,52 @@ impl Palette {
         bytemuck::cast_slice(&v).to_vec()
     }
 }
+
+/// Writes a sample of living cells and a map of who is where, for studying a run over time.
+pub fn dump(world: &mut World, path: &str, want: usize) -> Result<(), String> {
+    use std::io::Write;
+    world.flush();
+    let slots = world.cfg.slots as u64;
+    let alive = world.alive().max(1) as u64;
+    let genome_bytes = world.cfg.blocks() as u64 * 16;
+    let need = (want as u64 * slots / alive).min(slots).min(80_000);
+    const RUN: u64 = 8;
+    let runs = need.div_ceil(RUN).max(1);
+    let gap = (slots / runs).max(1);
+    let len = RUN.min(slots);
+    let starts: Vec<u64> = (0..runs).map(|k| (k * gap).min(slots.saturating_sub(len))).collect();
+    let of = |stride: u64| -> Vec<(u64, u64)> { starts.iter().map(|s| (s * stride, len * stride)).collect() };
+    let cell = world.read_ranges("cell", &of(CELL_BYTES));
+    let stat = world.read_ranges("stat", &of(STAT_BYTES));
+    let run_list: Vec<(u64, u64)> = starts.iter().map(|s| (*s, len)).collect();
+    let genome = world.read_genomes(&run_list, genome_bytes);
+    let size = world.cfg.size as usize;
+    let occ = world.read_u32s("occ");
+    let mut map = vec![0u8; size * size / 8 + 1];
+    for (p, o) in occ.iter().enumerate() {
+        if *o != 0 && *o != u32::MAX {
+            map[p / 8] |= 1 << (p % 8);
+        }
+    }
+    let mut f = std::io::BufWriter::new(std::fs::File::create(path).map_err(|e| e.to_string())?);
+    let mut kept = vec![];
+    for i in 0..starts.len() * len as usize {
+        let c = &cell[i * CELL_BYTES as usize..(i + 1) * CELL_BYTES as usize];
+        let e = f32::from_le_bytes(c[0..4].try_into().unwrap());
+        let age = f32::from_le_bytes(c[8..12].try_into().unwrap());
+        if e > 0.0 && age >= 50.0 {
+            kept.push(i);
+        }
+    }
+    let head = json!({"tick": world.tick, "size": size, "alive": alive, "count": kept.len(), "genome_bytes": genome_bytes, "hidden_rows": world.cfg.hidden_rows, "physics": world.cfg.physics}).to_string();
+    let w = |f: &mut std::io::BufWriter<std::fs::File>, b: &[u8]| f.write_all(b).map_err(|e| e.to_string());
+    w(&mut f, &(head.len() as u64).to_le_bytes())?;
+    w(&mut f, head.as_bytes())?;
+    w(&mut f, &map)?;
+    for i in kept {
+        w(&mut f, &cell[i * CELL_BYTES as usize..(i + 1) * CELL_BYTES as usize])?;
+        w(&mut f, &stat[i * STAT_BYTES as usize..(i + 1) * STAT_BYTES as usize])?;
+        w(&mut f, &genome[i * genome_bytes as usize..(i + 1) * genome_bytes as usize])?;
+    }
+    Ok(())
+}
