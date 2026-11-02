@@ -1563,3 +1563,105 @@ fn measuring_changes_nothing_with_everything_on() {
     sets.extend_from_slice(DEEP_RULES);
     measuring_changes_nothing(&sets);
 }
+
+#[test]
+fn traffic_on_lines_stands_out_and_even_traffic_does_not() {
+    const SIZE: usize = 64;
+    let mut seed = 5u64;
+    let mut next = move |n: usize| {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (seed >> 33) as usize % n
+    };
+    let mut even = vec![0f32; SIZE * SIZE];
+    for _ in 0..40_000 {
+        even[next(SIZE * SIZE)] += 1.0;
+    }
+    let got = measure::traffic_lines(&even, &|_| true, SIZE, 8);
+    assert!((got - 1.0).abs() < 0.2, "even steps gave {got}");
+
+    // Patches of different richness don't count: every block is even inside.
+    let mut patchy = vec![0f32; SIZE * SIZE];
+    for _ in 0..80_000 {
+        let p = next(SIZE * SIZE);
+        let (bx, by) = ((p % SIZE) / 8, (p / SIZE) / 8);
+        if (bx + by) % 2 == 0 || next(4) == 0 {
+            patchy[p] += 1.0;
+        }
+    }
+    let got = measure::traffic_lines(&patchy, &|_| true, SIZE, 8);
+    assert!((got - 1.0).abs() < 0.25, "patches gave {got}");
+
+    // The same number of steps along one line through each block.
+    let mut lined = vec![0f32; SIZE * SIZE];
+    for _ in 0..40_000 {
+        let p = next(SIZE * SIZE);
+        lined[(p / SIZE) / 8 * 8 * SIZE + p % SIZE] += 1.0;
+    }
+    let got = measure::traffic_lines(&lined, &|_| true, SIZE, 8);
+    assert!(got > 20.0, "lines gave {got}");
+
+    // Rock doesn't count as a square nobody walked on.
+    let got = measure::traffic_lines(&even, &|p| p % SIZE != 0, SIZE, 8);
+    assert!((got - 1.0).abs() < 0.2, "even steps beside rock gave {got}");
+}
+
+#[test]
+fn a_rule_output_counts_once_per_cell() {
+    // Two outputs over three situations.
+    let all = [1.0, 0.0, 1.0, 1.0, 1.0, 2.0];
+    assert_eq!(measure::outputs_once(&all, 3), vec![1.0, 1.0]);
+    assert!(measure::outputs_once(&[], 3).is_empty());
+}
+
+#[test]
+fn a_lone_outlier_is_not_a_strategy() {
+    // Two real groups, and one cell far from both with a centre of its own.
+    let mut points = vec![];
+    let mut label = vec![];
+    for i in 0..30 {
+        points.push(vec![(i % 5) as f32 * 0.01, 0.0]);
+        label.push(0);
+        points.push(vec![10.0 + (i % 5) as f32 * 0.01, 0.0]);
+        label.push(1);
+    }
+    points.push(vec![5.0, 40.0]);
+    label.push(2);
+    let centres = vec![vec![0.02, 0.0], vec![10.02, 0.0], vec![5.0, 40.0]];
+    let groups = measure::merge_close(&centres, &points, &label);
+    assert_ne!(groups[0], groups[1]);
+    assert!(groups[2] == groups[0] || groups[2] == groups[1]);
+    assert_eq!(groups.iter().max(), Some(&1));
+}
+
+#[test]
+fn a_batch_refuses_walls_or_tiles_that_would_not_keep_worlds_apart() {
+    let with = |sets: &[(&str, &str)]| {
+        let mut c = auto_life_gpu::Config::new(256, 1, None).unwrap();
+        for (k, v) in sets {
+            c.set(k, v).unwrap();
+        }
+        c.check_batch()
+    };
+    assert!(with(&[]).is_ok());
+    assert!(with(&[("batch_tile", "64")]).is_ok());
+    assert!(with(&[("batch_tile", "100")]).is_err());
+    assert!(with(&[("batch_tile", "512")]).is_err());
+    assert!(with(&[("batch_tile", "64"), ("batch_wall", "2")]).is_err());
+    assert!(with(&[("batch_tile", "64"), ("vision_steps", "4")]).is_err());
+    assert!(with(&[("batch_tile", "64"), ("vision_steps", "4"), ("batch_wall", "8")]).is_ok());
+}
+
+#[test]
+fn mineral_cant_be_turned_on_in_a_world_built_without_it() {
+    let mut plain = world_with(64, 2, &[]);
+    plain.step();
+    plain.flush();
+    let path = std::env::temp_dir().join(format!("life-no-mineral-{}.bin", std::process::id()));
+    let path = path.to_str().unwrap().to_string();
+    plain.save(&path).unwrap();
+    let mut with = world_with(64, 2, &[("mineral_on", "true")]);
+    let why = with.load(&path).unwrap_err();
+    assert!(why.contains("mineral"), "{why}");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(with.cfg.scope("mineral_on"), auto_life_gpu::config::Scope::NewWorld);
+}

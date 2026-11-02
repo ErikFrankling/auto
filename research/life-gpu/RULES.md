@@ -114,3 +114,12 @@ An input whose rule is off reads 0 and isn't computed. An action whose rule is o
 - No combination has been run on the real GPU or at 512. This merge ran only on the software driver, at 128 and below, which shows that it works and adds up, not what it does to life. `act.wgsl` now binds 18 storage buffers. That passed on the software driver, and hasn't been tried on the real one.
 - Every rule's effect on species comes from its own thin runs in `exp/*/README.md`, and nearly all of those say no verdict.
 - `waste_harm`, armour, pack and mass ranges are mostly guesses around one tested value.
+
+### Batches, and limits of these measures
+
+`batch_tile` puts separate worlds on one map, each `batch_tile` wide with its own land, and `batch_wall` of rock between them. `World::new` refuses a wall thinner than cells can sense across, or a tile that doesn't fit the map. `--seed-from file.bin@256:5` takes one world out of a batch. With `weather_sun_on`, a world's sun map slides onto its neighbour's: no life or field crosses, but the land isn't strictly its own.
+
+- GPU counters (`group_hunting`, `birth_limit`, `child_size_hist`, `coat`, `follows_others_scent`) cover the whole map, so in a batch they point at physics, not at one world. Check any lead in a single world.
+- `trails.top5_share` against `top5_chance` is high in any living world, because cells live in colonies. Read `trails.lines` instead, against control worlds, and look at the Traffic view: cells pacing the gaps inside a colony also score.
+- `mineral_on` needs a new world. It can't be turned on in a loaded one.
+- With both `mass_on` and `gang_on`, a cell that bites and then shoves its target leaves an attack mark on the wrong square for one tick. Small, and known.

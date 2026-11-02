@@ -478,11 +478,10 @@ def key_tracking(r):
     return c.get("key_tracking", 0)
 
 
-def trail_excess(r):
+def trail_lines(r):
+    """Traffic piled on a few squares inside small blocks. 1 is even. See measure::traffic_lines."""
     t = r.get("trails") or {}
-    if t.get("steps", 0) < 1000:
-        return 0
-    return t.get("top5_share", 0) - t.get("top5_chance", 0)
+    return t.get("lines", 0) if t.get("steps", 0) >= 1000 else 0
 
 
 def scent_follow(r):
@@ -528,7 +527,7 @@ MEASURES = {
     "coat diversity": lambda r: get(r, "coat", "effective", default=0),
     "keys tracking common coats": key_tracking,
     "spread of child sizes": size_spread,
-    "busy squares beyond chance": trail_excess,
+    "traffic on lines (1 is even)": trail_lines,
     "following others' scent": scent_follow,
     "colonies moved past their radius": lambda r: get(r, "time", "colony_travel", "share_past_own_radius", default=0) if get(r, "time", "colony_travel", "tracked", default=0) >= 5 else 0,
     "spread of colony sizes (log10 sd)": lambda r: get(r, "land", "sizes", "log10_sd", default=0),

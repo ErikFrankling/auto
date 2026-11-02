@@ -729,13 +729,18 @@ fn depth_log(world: &mut World, cells: &[Sample], out: &mut Value) {
             .collect();
         world.trail_last = fd.iter().map(|v| v[3]).collect();
         let total: f64 = steps.iter().map(|v| *v as f64).sum();
+        let terrain = world.read_u32s("terrain");
+        let lines = crate::measure::traffic_lines(&steps, &|p| terrain[p] & (1 << 24) == 0, world.cfg.size as usize, 8);
         let top = (world.open as usize / 20).clamp(1, steps.len());
         steps.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
         let busiest: f64 = steps[..top].iter().map(|v| *v as f64).sum();
         out["trails"] = json!({
             "steps": total,
             "top5_share": round3((busiest / total.max(1.0)) as f32),
+            // If steps fell evenly over all open squares. They don't: cells live in colonies, so the
+            // busiest squares always beat this. "lines" is the one to read for trails.
             "top5_chance": round3(crate::measure::chance_top_share(total / world.open.max(1) as f64, 0.05) as f32),
+            "lines": round3(lines),
         });
     }
 }

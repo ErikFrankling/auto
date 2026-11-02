@@ -248,7 +248,7 @@ fn cell_of(rec: &[u8], size: usize, hr: usize, tests: &[Inputs]) -> Cell {
         }
         beyond.extend(measure::rule_outputs(&rule, &out));
     }
-    print.append(&mut beyond);
+    print.extend(measure::outputs_once(&beyond, tests.len()));
     Cell {
         diet: st[0..4].try_into().unwrap(),
         budget: st[4..16].try_into().unwrap(),

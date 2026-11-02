@@ -100,6 +100,53 @@ pub fn rule_outputs(rules: &Rules, out: &Outputs) -> Vec<f32> {
     v
 }
 
+/// What a brain chooses besides its budget, once per cell rather than once per situation. Hundreds
+/// of copies of a coat angle would outweigh everything it does, and split one way of living
+/// into many just because its coats differ.
+pub fn outputs_once(all: &[f32], situations: usize) -> Vec<f32> {
+    if all.is_empty() || situations == 0 {
+        return vec![];
+    }
+    let width = all.len() / situations;
+    (0..width)
+        .map(|k| all.iter().skip(k).step_by(width).sum::<f32>() / situations as f32)
+        .collect()
+}
+
+/// Whether traffic runs along lines. Inside a small block, land and numbers are about the same, so
+/// steps that fall evenly there give a variance about equal to their mean, whatever the density.
+/// Steps piled onto a few squares of each block give more. Weighted by steps, and blocks with
+/// little traffic are left out. Not proof of a trail: cells pacing the few gaps inside a colony
+/// also score, so read it against control worlds and look at the map.
+pub fn traffic_lines(steps: &[f32], open: &dyn Fn(usize) -> bool, size: usize, block: usize) -> f32 {
+    let (mut sum, mut weight) = (0f64, 0f64);
+    for by in (0..size).step_by(block) {
+        for bx in (0..size).step_by(block) {
+            let mut v = vec![];
+            for y in by..(by + block).min(size) {
+                for x in bx..(bx + block).min(size) {
+                    let p = y * size + x;
+                    if open(p) {
+                        v.push(steps[p] as f64);
+                    }
+                }
+            }
+            if v.len() * 2 < block * block {
+                continue;
+            }
+            let total: f64 = v.iter().sum();
+            let mean = total / v.len() as f64;
+            if mean < 2.0 {
+                continue;
+            }
+            let var = v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / v.len() as f64;
+            sum += var / mean * total;
+            weight += total;
+        }
+    }
+    if weight > 0.0 { (sum / weight) as f32 } else { 0.0 }
+}
+
 pub fn round3(v: f32) -> f32 {
     (v * 1000.0).round() / 1000.0
 }
@@ -223,6 +270,25 @@ pub fn merge_close(centres: &[Vec<f32>], points: &[Vec<f32>], label: &[usize]) -
                 if x != y {
                     group[x] = y;
                 }
+            }
+        }
+    }
+    // A lone outlier or an empty centre isn't a strategy, so it counts with its nearest neighbour.
+    for a in 0..k {
+        if members[a].len() >= 2 {
+            continue;
+        }
+        let nearest = (0..k)
+            .filter(|b| *b != a && members[*b].len() >= 2)
+            .map(|b| {
+                let d: f32 = centres[a].iter().zip(&centres[b]).map(|(x, y)| (x - y) * (x - y)).sum();
+                (d, b)
+            })
+            .min_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
+        if let Some((_, b)) = nearest {
+            let (x, y) = (find(&mut group, a), find(&mut group, b));
+            if x != y {
+                group[x] = y;
             }
         }
     }

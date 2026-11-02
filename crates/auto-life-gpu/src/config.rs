@@ -193,7 +193,32 @@ impl Config {
     }
 
     /// When a setting takes effect, found by reading the shaders, so new settings are right on their own.
+    /// A batch only keeps its worlds apart if they fit the map and nothing can sense across the rock.
+    pub fn check_batch(&self) -> Result<(), String> {
+        let tile = self.f("batch_tile") as u32;
+        if tile == 0 {
+            return Ok(());
+        }
+        if !tile.is_power_of_two() || tile < 32 || tile > self.size || !self.size.is_multiple_of(tile) {
+            return Err(format!("batch_tile {tile} must be a power of two, at least 32, that divides the world size {}", self.size));
+        }
+        let sight = 1u32 << (self.f("vision_steps") as u32).saturating_sub(1);
+        let wall = self.f("batch_wall") as u32;
+        if wall < sight.max(3) {
+            return Err(format!("batch_wall {wall} is thinner than what cells can sense across, {}", sight.max(3)));
+        }
+        let bloom = self.f("bloom_grid") as u32;
+        if self.f("bloom_share") > 0.0 && bloom > 0 && !tile.is_multiple_of(bloom) {
+            return Err(format!("batch_tile {tile} must be a multiple of bloom_grid {bloom}"));
+        }
+        Ok(())
+    }
+
     pub fn scope(&self, key: &str) -> Scope {
+        // Mineral has to be laid down with the land, or no square could ever hold any.
+        if key == "mineral_on" {
+            return Scope::NewWorld;
+        }
         // The running world takes the sun through its scale, which `World::set_physics` works out.
         if key == "sun" {
             return Scope::Live;

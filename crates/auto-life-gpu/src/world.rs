@@ -183,6 +183,7 @@ impl World {
 
     /// A new world on a device someone else also uses, such as a window.
     pub fn with_gpu(gpu: Arc<Gpu>, cfg: Config, pacing: Pacing) -> Result<World, String> {
+        cfg.check_batch()?;
         let mut w = Self::allocate(gpu, cfg, pacing)?;
         w.build_terrain()?;
         Ok(w)
@@ -1044,6 +1045,10 @@ impl World {
         f.read_exact(&mut head).map_err(|e| e.to_string())?;
         let head: serde_json::Value = serde_json::from_slice(&head).map_err(|e| e.to_string())?;
         check_layout(&head, path)?;
+        // Mineral is laid down with the land. Turned on later, no square could ever hold any.
+        if self.cfg.b("mineral_on") && !head["physics"]["mineral_on"].as_bool().unwrap_or(false) {
+            return Err(format!("{path} was built without mineral, so mineral_on needs a new world"));
+        }
         let shard = head["shard_slots"]
             .as_u64()
             .unwrap_or(self.cfg.max_shard_slots() as u64);

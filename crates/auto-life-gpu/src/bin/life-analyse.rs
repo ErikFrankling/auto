@@ -797,12 +797,14 @@ fn fingerprint(g: &[f32], hr: usize, situations: &[Situation]) -> Vec<f32> {
     let make = |energy: f32, food: f32, front: u8| {
         inputs_for(&Situation { energy, food, food_east: false, front, hit: false, crowd: 0.0 })
     };
-    for i in measure::rule_situations(&r, &make) {
+    let extra = measure::rule_situations(&r, &make);
+    let count = situations.len() + extra.len();
+    for i in extra {
         let out = settle(g, hr, &i);
         print_budget(&split_budget(&raw_budget(&out)), &mut v);
         beyond.extend(measure::rule_outputs(&r, &out));
     }
-    v.append(&mut beyond);
+    v.extend(measure::outputs_once(&beyond, count));
     v
 }
 
@@ -1363,6 +1365,7 @@ fn main() {
             // unlike the rest of the depth measures it can be told apart world by world.
             let mut steps: Vec<f32> = w.fd.iter().map(|v| v[3]).collect();
             let open = w.terrain.iter().filter(|t| *t & (1 << 24) == 0).count().max(1);
+            let lines = auto_life_gpu::measure::traffic_lines(&steps, &|p| w.terrain[p] & (1 << 24) == 0, tile, 8);
             let total: f64 = steps.iter().map(|v| *v as f64).sum();
             steps.sort_unstable_by(|a, b| b.partial_cmp(a).unwrap());
             let busiest: f64 = steps[..(open / 20).clamp(1, steps.len())].iter().map(|v| *v as f64).sum();
@@ -1370,6 +1373,7 @@ fn main() {
                 "steps": total,
                 "top5_share": (busiest / total.max(1.0) * 1000.0).round() / 1000.0,
                 "top5_chance": (auto_life_gpu::measure::chance_top_share(total / open as f64, 0.05) * 1000.0).round() / 1000.0,
+                "lines": (lines * 1000.0).round() / 1000.0,
             });
             tiles.push(json!({"tile": i, "tick": w.tick, "size": tile, "alive": alive, "economy": e, "brains": b, "trails": trails}));
             eprintln!("{}: tile {i} of {}, {alive} cells", args[1], per_side * per_side);

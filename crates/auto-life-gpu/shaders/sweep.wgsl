@@ -201,7 +201,7 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
             b3 += f3;
             // Mineral drains toward each square's richness, so patches last for ever. The
             // trade is in whole grains between a pair, so the total can't change by a single bit.
-            if (MINERAL_ON) {
+            if (MINERAL_ON && a3.z + b3.z > 0.0) {
                 let wa = a3.z;
                 let wb = b3.z;
                 let m = round(MINERAL_FLOW * (a3.y * wb - b3.y * wa) / (wa + wb) * GRAIN) / GRAIN;
