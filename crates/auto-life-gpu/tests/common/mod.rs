@@ -5,6 +5,32 @@
 use auto_life_gpu::config::{CELL_BYTES, IN_BLOCKS, OUT_ROWS};
 use auto_life_gpu::{Config, Pacing, World};
 
+/// Every rule on at once, with settings gentle enough for life to get going.
+pub const ALL_RULES: &[(&str, &str)] = &[
+    ("mass_on", "true"),
+    ("armour_on", "true"),
+    ("pack_on", "true"),
+    ("waste_on", "true"),
+    ("waste_clean", "true"),
+    ("waste_holds", "0.2"),
+    ("plants_on", "true"),
+    ("plants_peak", "2"),
+    ("weather_sun_on", "true"),
+    ("weather_fire_on", "true"),
+    ("weather_fire_rate", "0.000001"),
+    ("mate_pay", "0.5"),
+    ("compat", "0.6"),
+    ("skill_on", "true"),
+    ("skill_sense", "true"),
+    ("skill_naive", "0.8"),
+    ("biomes_on", "true"),
+    ("walls_on", "true"),
+    ("wall_pass", "8"),
+    ("wall_thick", "2"),
+    ("bloom_share", "0.3"),
+    ("roads_on", "true"),
+];
+
 pub const ROCK: u32 = u32::MAX;
 pub const NONE: u32 = u32::MAX;
 
@@ -287,6 +313,16 @@ pub fn energy_gap_under(rules: &[(&str, &str)], ticks: u32, limit: f64) {
         .map(|v| v[0] as f64 + v[1] as f64)
         .sum();
     let body = w.cfg.f("body") as f64;
+    // A cell whose energy isn't a number would keep spending what it doesn't have, and max()
+    // below would hide it.
+    for r in w.read_cells().iter().filter(|r| r[10] != NONE) {
+        assert!(
+            f32_at(r, 0).is_finite() && f32_at(r, 1).is_finite(),
+            "a cell with energy {} and womb {}",
+            f32_at(r, 0),
+            f32_at(r, 1)
+        );
+    }
     let cells: f64 = w
         .read_cells()
         .iter()

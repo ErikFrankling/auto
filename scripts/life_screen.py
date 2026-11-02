@@ -3,11 +3,14 @@
 
   life_screen.py queue NAME COUNT [--size 256] [--ticks 120000] [--controls N] [--priority PREFIX] [--rule-chance 0.3]
   life_screen.py analyse     keeps measuring finished runs until none are left to wait for
-  life_screen.py rank        prints the worlds that stand out
+  life_screen.py rank [N]    prints the best N worlds for each measure, and those good at several
 
 Runs are small on purpose, so hundreds fit. What holds up here gets scaled up.
 Every physics setting is sampled around its default, and each rule in research/life-gpu/RULES.md
 is on by chance, with its settings sampled too. Nothing here feeds into a world.
+
+The binaries can be set with LIFE_BIN, LIFE_ANALYSE and LIFE_HISTORY, so a separate installed
+build can run the screen.
 """
 import json
 import math
@@ -23,9 +26,9 @@ ROOT = Path(__file__).resolve().parent.parent
 RUNS = Path("/tmp/lg/screen")
 OUT = ROOT / "research/life-gpu/screen"
 SPOOL = Path("/tmp/life-spool")
-BIN = "/tmp/life-stable/direct"
-ANALYSE = "/tmp/life-target/release/life-analyse"
-HISTORY = "/tmp/life-target/release/life-history"
+BIN = os.environ.get("LIFE_BIN", "/tmp/life-stable/direct")
+ANALYSE = os.environ.get("LIFE_ANALYSE", "/tmp/life-target/release/life-analyse")
+HISTORY = os.environ.get("LIFE_HISTORY", "/tmp/life-target/release/life-history")
 
 # Settings worth varying, as (low, high, log scale). Switches are chosen by chance.
 RANGES = {
@@ -88,6 +91,20 @@ RANGES = {
     "track_decay": (0.0005, 0.01, True),
     "track_flow": (0.001, 0.02, True),
     "road_ease": (1, 6, False),
+    # The rules in research/life-gpu/PREDICTIONS.md, which says why each range is where it is.
+    "gang_sharp": (1, 3, False),
+    "coat_sharp": (2, 32, True),
+    "coat_floor": (0.01, 0.15, True),
+    "coat_rate": (0.0005, 0.01, True),
+    "coat_cost": (0.5, 8, True),
+    "mineral_start": (0.08, 1.2, True),
+    "mineral_birth": (0.5, 2, False),
+    "mineral_flow": (0.001, 0.05, True),
+    "mineral_contrast": (0.8, 3, False),
+    "mineral_anti": (0, 1, False),
+    "birth_min": (1.2, 3, False),
+    "womb_cap": (10, 60, True),
+    "age_rest": (0.02, 0.5, True),
 }
 
 # The rules. Each is (switches set when it's on, settings sampled from RANGES, switches
@@ -107,6 +124,11 @@ RULES = {
     "walls": ({"walls_on": True}, ["wall_pass", "wall_thick"], []),
     "blooms": ({}, ["bloom_share", "bloom_fade"], []),
     "roads": ({"roads_on": True}, ["track_decay", "track_flow", "road_ease"], []),
+    "gang": ({"gang_on": True}, ["gang_sharp"], ["gang_sense"]),
+    "coat": ({"coat_on": True}, ["coat_sharp", "coat_floor", "coat_rate", "coat_cost"], ["coat_sense"]),
+    "mineral": ({"mineral_on": True}, ["mineral_start", "mineral_birth", "mineral_flow", "mineral_contrast", "mineral_anti"], []),
+    "birth": ({"birth_choice": True}, ["birth_min", "womb_cap"], []),
+    "ageing": ({"age_metabolic": True}, ["age_rest"], []),
 }
 # Settings that belong to a rule, so a world without that rule doesn't vary them.
 RULE_ONLY = {k for _, keys, _ in RULES.values() for k in keys} | {"waste_holds"}
@@ -155,6 +177,10 @@ def set_flags(physics):
     return " ".join(f"--set {k}={str(v).lower() if isinstance(v, bool) else v}" for k, v in physics.items())
 
 
+# Measuring only, with no effect on a world, and on for every run so that all compare.
+MEASURING = {"trail_stats": True}
+
+
 def queue(name, count, size, ticks, controls, priority, rule_chance=0.3):
     RUNS.mkdir(parents=True, exist_ok=True)
     shaders = RUNS / f"shaders-{name}"
@@ -168,7 +194,7 @@ def queue(name, count, size, ticks, controls, priority, rule_chance=0.3):
         seed = rng.randrange(1, 2**31)
         physics = {} if i < controls else sample(rng, rng.randint(1, 6), rule_chance, size)
         (d / "spec.json").write_text(json.dumps({"run": run, "seed": seed, "size": size, "ticks": ticks, "physics": physics}))
-        sets = set_flags(physics)
+        sets = set_flags({**physics, **MEASURING})
         # An exit from a world that dies out still counts: dead worlds are a result.
         cmd = (
             f"{BIN} --shaders {shaders} --size {size} --seed {seed} {sets} --ticks {ticks} --log-every {ticks // 8}"
@@ -217,6 +243,9 @@ def features(d):
         hardness=w.get("hardness"), wound=w.get("wound"), practice=w.get("practice"),
         follows_scent=w["follows_scent"], hist=l.get("from_other_cells_hist"), founders=l.get("founder_lines"),
         no_slot=l.get("births_no_slot"),
+        group_hunting=l.get("group_hunting"), birth_limit=l.get("birth_limit"), coat=l.get("coat"),
+        mineral=l.get("mineral"), trails=l.get("trails"), child_sizes=l.get("child_size_hist"), child_energy=l.get("child_energy"),
+        follows_others=(l.get("follows_others_scent") or {}).get("mean"),
     )
     a = d / "analyse.json"
     if a.exists():
@@ -231,7 +260,12 @@ def features(d):
             scent=max((h[f"scent {i}"]["mean"] for i in range(4)), key=abs),
         )
         e = x["economy"]
-        out["land"] = dict(colonies=e["colonies"], overlap=e["colony_rich_overlap"])
+        out["land"] = dict(
+            colonies=e["colonies"], overlap=e["colony_rich_overlap"], sizes=e.get("colony_sizes"),
+            explained_by_sun=e.get("colony_size_explained_by_sun"), mineral=e.get("mineral_land"),
+        )
+        links = b.get("bite_links") or {}
+        out["brain"].update(links=links.get("links"), bites_across=links.get("share_across_strategies"))
     h = d / "history.json"
     if h.exists():
         x = json.loads(h.read_text())
@@ -244,6 +278,9 @@ def features(d):
             lasting=sum(1 for s in x["strategies"] if sum(1 for v in s["share_over_time"] if v >= 0.05) >= 3),
             turnover=sum(abs(a - b) for row in shares for a, b in zip(row, row[1:])) / max(len(shares[0]) - 1, 1) / 2 if shares else 0,
             new_species=x["new_species"], crashes=sum(1 for e in x["events"] if e["kind"] == "population crash"),
+            fine=x.get("fine_groups"), persistent_1pct=x.get("persistent_1pct"), persistent_3pct=x.get("persistent_3pct"),
+            distinct_3pct=x.get("distinct_3pct_over_time"), coexistence=x.get("coexistence"),
+            colony_travel=x.get("colony_travel"), colony_sizes=(x.get("colony_sizes") or [None])[-1],
         )
     return out
 
@@ -278,26 +315,120 @@ def analyse_once():
     return done
 
 
-def rank():
+def get(r, *path, default=None):
+    for k in path:
+        r = r.get(k) if isinstance(r, dict) else None
+        if r is None:
+            return default
+    return r
+
+
+def overlap_at(r, tile):
+    """How far strategies live side by side at one tile size, or 0 if there's only one."""
+    for c in get(r, "time", "coexistence", default=[]):
+        if c["tile"] == tile:
+            return c.get("mean_overlap") or 0
+    return 0
+
+
+def group_rise(r):
+    """Each attacker's gain in a group of 3 or more, over a lone bite, if there are enough of both."""
+    g = r.get("group_hunting") or {}
+    bites, gain = g.get("bites") or [], g.get("gain_per_bite") or []
+    if len(bites) < 8 or bites[0] < 20 or sum(bites[2:]) < 20:
+        return 0
+    return sum(b * x for b, x in zip(bites[2:], gain[2:])) / sum(bites[2:]) / max(gain[0], 1e-6)
+
+
+def gang_excess(r):
+    """Others on the same target beyond those on a body the biter could have picked and didn't."""
+    g = r.get("group_hunting") or {}
+    if sum(g.get("bites") or []) < 50:
+        return 0
+    return g.get("extras", 0) - g.get("extras_control", 0)
+
+
+def limit_balance(r):
+    """High only when both nutrients really limit births. Half is the most it can be."""
+    b = r.get("birth_limit") or {}
+    energy, mineral = b.get("energy", 0) + b.get("both", 0), b.get("mineral", 0) + b.get("both", 0)
+    total = energy + mineral
+    return min(energy, mineral) / total if total > 0 else 0
+
+
+def key_tracking(r):
+    c = r.get("coat") or {}
+    return c.get("key_tracking", 0)
+
+
+def trail_excess(r):
+    t = r.get("trails") or {}
+    if t.get("steps", 0) < 1000:
+        return 0
+    return t.get("top5_share", 0) - t.get("top5_chance", 0)
+
+
+def scent_follow(r):
+    return max((abs(v) for v in r.get("follows_others") or []), default=0)
+
+
+def size_spread(r):
+    """How far apart child sizes are, as effective bins of the log-sized histogram."""
+    h = r.get("child_sizes") or []
+    total = sum(h)
+    if total < 50:
+        return 0
+    return math.exp(-sum(c / total * math.log(c / total) for c in h if c > 0))
+
+
+def strategies_now(r):
+    top = get(r, "brain", "top", default=[])
+    return math.exp(-sum(p * math.log(p) for p in top if p > 0)) if top else 0
+
+
+# Keep the best of each, since novelty, complexity and adaptation don't track each other
+# (DISHTINY, in the note). Each says something different, and no world is ranked by a total.
+MEASURES = {
+    "strategies at silhouette k": strategies_now,
+    "behaviour dimensions": lambda r: get(r, "brain", "dims", default=0),
+    "species explain behaviour": lambda r: max(r.get("explain") or 0, 0),
+    "lasting strategies (silhouette k)": lambda r: get(r, "time", "lasting", default=0),
+    "persistent fine strategies over 3%": lambda r: get(r, "time", "persistent_3pct", default=0),
+    "persistent fine strategies over 1%": lambda r: get(r, "time", "persistent_1pct", default=0),
+    "strategy turnover": lambda r: get(r, "time", "turnover", default=0),
+    "species": lambda r: min(r.get("species") or 1, 50),
+    "side by side at 32 squares": lambda r: overlap_at(r, 32),
+    "real links in who bites whom": lambda r: get(r, "brain", "links", default=0),
+    "gain in a group over gain alone": group_rise,
+    "others on a target beyond the control": gang_excess,
+    "both nutrients limiting": limit_balance,
+    "coat diversity": lambda r: get(r, "coat", "effective", default=0),
+    "keys tracking common coats": key_tracking,
+    "spread of child sizes": size_spread,
+    "busy squares beyond chance": trail_excess,
+    "following others' scent": scent_follow,
+    "colonies moved past their radius": lambda r: get(r, "time", "colony_travel", "share_past_own_radius", default=0),
+    "spread of colony sizes (log10 sd)": lambda r: get(r, "land", "sizes", "log10_sd", default=0),
+    "colonies free of terrain": lambda r: 1 - get(r, "land", "explained_by_sun", default=1) if get(r, "land", "sizes", "count", default=0) >= 10 else 0,
+}
+
+
+def rank(top=5):
     rows = [json.loads(l) for l in open(OUT / "results.jsonl")]
     live = [r for r in rows if not r.get("dead") and r.get("brain")]
-    def score(r):
-        b, t = r["brain"], r.get("time") or {}
-        top = b["top"]
-        entropy = -sum(p * math.log(p) for p in top if p > 0)
-        return (
-            math.exp(entropy)
-            + 0.4 * b["dims"]
-            + 3 * max(r.get("explain") or 0, 0)
-            + 0.5 * (t.get("lasting") or 0)
-            + 4 * (t.get("turnover") or 0)
-            + 0.6 * min(r.get("species") or 1, 8)
-        )
-    live.sort(key=score, reverse=True)
     print(f"{len(rows)} runs, {len(live)} measured, {sum(1 for r in rows if r.get('dead'))} died out")
-    for r in live[:25]:
-        b, t = r["brain"], r.get("time") or {}
-        print(f"{score(r):5.1f} {r['run']:12s} cells {r['cells']:6d} species {r.get('species') or 0:4.1f} k {b['k']} dims {b['dims']:.1f} explain {r.get('explain') or 0:.2f} others {r['from_others'] * 100:3.0f}% move {r['moving'] * 100:3.0f}% {','.join(t.get('labels') or [])[:60]} | {r['physics']}")
+    wins = {}
+    for name, measure in MEASURES.items():
+        scored = sorted(((measure(r), r) for r in live), key=lambda x: x[0], reverse=True)
+        scored = [(v, r) for v, r in scored if v > 0][:top]
+        print(f"\n{name}")
+        for v, r in scored:
+            print(f"  {v:7.3f} {r['run']:12s} cells {r['cells']:6d} | {r['physics']}")
+            wins.setdefault(r["run"], (r, []))[1].append(name)
+    print("\nGood at several things at once")
+    for run, (r, names) in sorted(wins.items(), key=lambda x: len(x[1][1]), reverse=True)[:top * 3]:
+        if len(names) >= 2:
+            print(f"  {len(names):2d} {run:12s} cells {r['cells']:6d} {', '.join(names)} | {r['physics']}")
 
 
 def main():
@@ -316,7 +447,7 @@ def main():
                 print("measured", n, flush=True)
             time.sleep(30)
     elif a[0] == "rank":
-        rank()
+        rank(int(a[1]) if len(a) > 1 else 5)
 
 
 if __name__ == "__main__":

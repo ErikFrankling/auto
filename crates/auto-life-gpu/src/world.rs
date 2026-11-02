@@ -15,6 +15,9 @@ use bytemuck::{Pod, Zeroable};
 use crate::config::{CELL_BYTES, CELL_WORDS, Config, STAT_BYTES, check_layout, layout_json};
 
 const RING_ENTRIES: usize = 4096;
+/// Counters saved with a world, and gauges after them that are measuring only and aren't.
+const COUNTERS: u64 = 32;
+pub const GAUGES: usize = 64;
 const WGSL_STRUCTS: &str = r#"
 struct Cell {
     e: f32, womb: f32, age: f32, hit: f32,
@@ -22,7 +25,7 @@ struct Cell {
     voice: vec2f, pos: u32, flags: u32,
     clade: u32, gen: u32, rgb: u32, stamp: u32,
     feel_u: f32, feel_d: f32, mate_near: f32, mate_kids: f32,
-    x0: f32, x1: f32, x2: f32, x3: f32,
+    mineral: f32, coat: f32, bound: f32, key: f32,
 }
 struct Stat {
     diet: vec4f,
@@ -108,6 +111,10 @@ pub struct World {
     pub open: u64,
     pub start_ground: f64,
     pub pacing: Pacing,
+    /// Gauges at the last report, for what's new since.
+    pub gauge_last: Vec<u32>,
+    /// Steps per square at the last report, when trail_stats is on.
+    pub trail_last: Vec<f32>,
     /// Longest and total time the GPU spent on a submission.
     pub longest_submit_ms: f64,
     /// Submissions over the limit since the last report. The first few of a run don't count:
@@ -203,7 +210,7 @@ impl World {
             ),
             ("ring", "u32", ring_cap * 4, copy),
             ("jobs", "vec4u", slots * 16, copy),
-            ("ctr", "atomic<u32>", 32 * 4, copy),
+            ("ctr", "atomic<u32>", (COUNTERS + GAUGES as u64) * 4, copy),
             ("ctl", "u32", 8 * 4, copy),
             ("args", "u32", 3 * 4, copy | wgpu::BufferUsages::INDIRECT),
             ("tiles", "vec4f", (tiles * tiles * 3 * 16).max(16), copy),
@@ -360,6 +367,8 @@ impl World {
             start_ground: 0.0,
             tick: 0,
             pacing,
+            gauge_last: vec![0; GAUGES],
+            trail_last: vec![],
             longest_submit_ms: 0.0,
             slow_submits: 0,
             gpu_seconds: 0.0,
@@ -480,6 +489,64 @@ impl World {
         let mut bytes = vec![0u8; self.stride];
         bytes[..48].copy_from_slice(bytemuck::bytes_of(&frame));
         self.gpu.queue.write_buffer(&self.frames, 0, &bytes);
+        // Mineral is laid out once the shape of each square's richness is known, so that its
+        // mean over open ground is what was asked for. It never changes after that.
+        if self.cfg.b("mineral_on") {
+            let rows_wanted = 256.min(w);
+            let step = (w / rows_wanted).max(1);
+            let ranges: Vec<(u64, u64)> = (0..rows_wanted)
+                .map(|k| ((k * step) as u64 * w as u64 * 16, w as u64 * 16))
+                .collect();
+            let bytes = self.read_ranges("fd", &ranges);
+            let (mut sum, mut open) = (0.0f64, 0.0f64);
+            for v in bytemuck::cast_slice::<u8, [f32; 4]>(&bytes) {
+                if v[2] > 0.0 {
+                    sum += v[2] as f64;
+                    open += 1.0;
+                }
+            }
+            let scale = self.cfg.f("mineral_start") as f64 / (sum / open.max(1.0)).max(1e-9);
+            let (fill, fill_group, _) = build_pipe(
+                &self.gpu,
+                &self.cfg,
+                &self.buffers,
+                &self.elems,
+                &self.frames,
+                "terrain.wgsl",
+                "fill_mineral",
+                binds,
+                None,
+            )?;
+            let mut row = 0;
+            while row < w {
+                let frame = Frame {
+                    row0: row,
+                    seed: self.cfg.seed,
+                    a: (scale as f32).to_bits(),
+                    ..Default::default()
+                };
+                let mut bytes = vec![0u8; self.stride];
+                bytes[..48].copy_from_slice(bytemuck::bytes_of(&frame));
+                self.gpu.queue.write_buffer(&self.frames, 0, &bytes);
+                let mut enc = self.gpu.device.create_command_encoder(&Default::default());
+                {
+                    let mut pass = enc.begin_compute_pass(&Default::default());
+                    pass.set_pipeline(&fill);
+                    pass.set_bind_group(0, &fill_group, &[0]);
+                    pass.dispatch_workgroups(w.div_ceil(64), band.min(w - row), 1);
+                }
+                self.gpu.queue.submit([enc.finish()]);
+                self.gpu.wait();
+                row += band;
+            }
+            let frame = Frame {
+                seed: self.cfg.seed,
+                ..Default::default()
+            };
+            let mut bytes = vec![0u8; self.stride];
+            bytes[..48].copy_from_slice(bytemuck::bytes_of(&frame));
+            self.gpu.queue.write_buffer(&self.frames, 0, &bytes);
+        }
         // Slots start free, in order.
         let mut enc = self.gpu.device.create_command_encoder(&Default::default());
         {
@@ -793,8 +860,14 @@ impl World {
         out
     }
 
+    /// Gauges, measuring only and never read by a rule. See common.wgsl for what each one holds.
+    pub fn gauges(&self) -> Vec<u32> {
+        let b = self.read_ranges("ctr", &[(COUNTERS * 4, GAUGES as u64 * 4)]);
+        bytemuck::cast_slice::<u8, u32>(&b).to_vec()
+    }
+
     pub fn counters(&self) -> [u32; 32] {
-        let b = self.read_ranges("ctr", &[(0, 128)]);
+        let b = self.read_ranges("ctr", &[(0, COUNTERS * 4)]);
         let mut out = [0u32; 32];
         out.copy_from_slice(bytemuck::cast_slice(&b));
         out
@@ -903,7 +976,7 @@ impl World {
             .map_err(|e| e.to_string())?;
         f.write_all(head.as_bytes()).map_err(|e| e.to_string())?;
         for name in self.saved_names() {
-            let size = self.buffers[name].size();
+            let size = self.saved_size(name);
             let mut at = 0;
             while at < size {
                 let n = (size - at).min(64 << 20);
@@ -945,7 +1018,7 @@ impl World {
         self.start_ground = head["start_ground"].as_f64().unwrap_or(0.0);
         let mut chunk = vec![0u8; 64 << 20];
         for name in self.saved_names() {
-            let size = self.buffers[name].size();
+            let size = self.saved_size(name);
             let mut at = 0;
             while at < size {
                 let n = (size - at).min(64 << 20);
@@ -1442,6 +1515,16 @@ impl World {
         self.gpu.queue.submit([]);
         self.gpu.wait();
         Ok(slot - first_slot)
+    }
+
+    /// Bytes of a buffer that a save holds. Gauges are only measurements, and leaving them out
+    /// means worlds saved before they existed still load.
+    fn saved_size(&self, name: &str) -> u64 {
+        if name == "ctr" {
+            COUNTERS * 4
+        } else {
+            self.buffers[name].size()
+        }
     }
 
     /// The buffers a saved world holds, in file order.

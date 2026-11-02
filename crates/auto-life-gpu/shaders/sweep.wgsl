@@ -9,8 +9,9 @@ const KEEP_B = vec4f(P0_DECAY_KEEP, P1_DECAY_KEEP, P2_DECAY_KEEP, P3_DECAY_KEEP)
 // fc.z is fire: it spreads and fades by its own rule below, not by flow and decay.
 const FLOW_C = vec4f(ENZYME_FLOW, WASTE_FLOW, 0.0, FCW_FLOW);
 const KEEP_C = vec4f(ENZYME_DECAY_KEEP, WASTE_DECAY_KEEP, 1.0, FCW_DECAY_KEEP);
-// fd.x is tracks. The rest of fd is free for the next rule, which must also switch this on.
-const FD_ON = ROADS_ON;
+// fd.x is tracks. fd.y and fd.z are mineral and how rich a square is in it, traded below.
+// fd.w only changes in act.wgsl. A rule that needs fd to be swept must also switch this on.
+const FD_ON = ROADS_ON || MINERAL_ON;
 const FLOW_D = vec4f(TRACK_FLOW, 0.0, 0.0, 0.0);
 const KEEP_D = vec4f(TRACK_DECAY_KEEP, 1.0, 1.0, 1.0);
 // Peak of a bloom: its volume is share of the sun, over one tile and one period.
@@ -198,6 +199,15 @@ fn main(@builtin(global_invocation_id) id: vec3u) {
             let f3 = FLOW_D * (a3 - b3);
             a3 -= f3;
             b3 += f3;
+            // Mineral drains toward each square's richness, so patches last for ever. The
+            // trade is in whole grains between a pair, so the total can't change by a single bit.
+            if (MINERAL_ON) {
+                let wa = a3.z;
+                let wb = b3.z;
+                let m = round(MINERAL_FLOW * (a3.y * wb - b3.y * wa) / (wa + wb) * GRAIN) / GRAIN;
+                a3.y -= m;
+                b3.y += m;
+            }
         }
         if (!rock_a) { fd[pa] = a3 * KEEP_D; }
         if (!rock_b) { fd[pb] = b3 * KEEP_D; }

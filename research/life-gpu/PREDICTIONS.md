@@ -88,7 +88,7 @@ Lean prey is best hunted alone, with each extra biter earning less. Fat prey can
 **What would show it's wrong.** `birth_limit` in the log splits sampled cells into energy, mineral, both, room and waiting.
 - It does nothing if the mineral share is under 5% in all seeds at 0.25.
 - It's only a tax if mineral is over 80% and strategy counts don't rise over a control.
-- The important check is in `life-analyse`: `land_table` should show occupancy and moving differ across sun and mineral together. `coexistence` tells if the specialists are only in different places, and if `overlap` falls while strategy count rises, it's geography and not depth.
+- The important check is in `life-analyse`: `mineral_land.table` should show occupancy and moving differ across sun and mineral together. `coexistence` tells if the specialists are only in different places, and if `overlap` falls while strategy count rises, it's geography and not depth.
 
 ## Rule 4. Life-history freedom (`birth_choice`, `age_metabolic`, `womb_cap`)
 

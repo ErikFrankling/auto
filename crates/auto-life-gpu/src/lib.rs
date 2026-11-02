@@ -3,6 +3,7 @@
 //! cell shows or smells of is something its own brain chose.
 
 pub mod config;
+pub mod measure;
 pub mod report;
 pub mod video;
 pub mod world;
