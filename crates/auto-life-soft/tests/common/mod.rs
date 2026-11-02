@@ -241,35 +241,7 @@ pub fn assert_ledger(w: &mut World, start: i128, what: &str) {
 
 /// Everything physical, as a hash, so two runs can be compared.
 pub fn fingerprint(w: &mut World) -> u64 {
-    w.flush();
-    let mut h = 0xcbf29ce484222325u64;
-    let mut mix = |v: u32| {
-        h = (h ^ v as u64).wrapping_mul(0x100000001b3);
-    };
-    for c in w.read_cells() {
-        if c.flags & F_ALIVE == 0 {
-            continue;
-        }
-        for v in bytemuck::cast_slice::<Cell, u32>(&[c]) {
-            mix(*v);
-        }
-    }
-    for s in w.read_fa() {
-        for v in s {
-            mix(v as u32);
-        }
-    }
-    for s in w.read_fb() {
-        for v in s {
-            mix(v as u32);
-        }
-    }
-    for v in w.read_sketches() {
-        for k in v {
-            mix(k);
-        }
-    }
-    h
+    w.fingerprint()
 }
 
 /// Settings that switch off every action except these, and give cells a budget. A fixed genome

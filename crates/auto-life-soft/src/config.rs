@@ -72,6 +72,19 @@ impl Config {
         cfg.hidden_rows = int("hidden_rows").unwrap_or(cfg.hidden_rows);
         cfg.shard_slots = int("shard_slots").unwrap_or_else(|| cfg.max_shard_slots());
         cfg.slots = int("slots").ok_or_else(|| format!("{path} has no slots"))?;
+        // A file of the wrong length would otherwise be read as garbage.
+        let head_len = {
+            use std::io::Read;
+            let mut len = [0u8; 8];
+            std::fs::File::open(path)
+                .and_then(|mut f| f.read_exact(&mut len))
+                .map_err(|e| format!("{path}: {e}"))?;
+            u64::from_le_bytes(len)
+        };
+        let on_disk = std::fs::metadata(path).map_err(|e| format!("{path}: {e}"))?.len();
+        if on_disk != 8 + head_len + crate::world::saved_bytes(&cfg) {
+            return Err(format!("{path} was saved by a different version, or is cut short"));
+        }
         if let Value::Object(saved) = &head["physics"] {
             for (k, v) in saved {
                 cfg.physics.insert(k.clone(), v.clone());

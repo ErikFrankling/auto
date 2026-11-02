@@ -90,6 +90,20 @@ Batches of walled-off worlds on one map must work, as in the lattice engine: roc
 
 Also predicted: with `stick` off, none of this forms bodies, and diffusion alone gives only loose crowds.
 
+## What changed while building it
+
+The engine is `crates/auto-life-soft`, and these are the places it differs from the text above, and why.
+
+- **Everything that adds up is an integer.** Energy, food and every field are in units of 1/65536. Positions are a u32 that wraps once round the world, so differences wrap by themselves. This makes the ledger exact to the unit rather than within rounding, and exchange between squares can't lose a thing: each side truncates the same flow towards zero with opposite signs.
+- **A bite has one target, and it's settled as supply and demand, not by each side working it out.** "Each side works out the same trade" can't bound what a cell loses: a biter can't see the other biters on its target without reading two steps away, and a share small enough to be safe for any number of biters (1 in 71, the most that fit in 3x3 bins) would make single biters useless. So each biter adds its wish to its target's word, and gets `min(1, what's left / total asked)` of it, the same rule as harvest. The design's bound holds exactly, and most cells, which aren't biting, pay nothing. It does write one atomic word in another cell's record. `tests/physics.rs` puts 12 biters on a cell holding 0.05.
+- **A gift is handed over the same way:** the giver adds to each contact's inbox, in proportion to match. It scans its contacts a second time, because the total of match isn't known until the first scan ends. Only givers pay for that.
+- **Slots are handed out in a fixed order.** With `atomicAdd` on a ring, which slot a cell gets depends on which thread ran first. Slots decide when a cell thinks and which cell a full bin drops, so no run would repeat. Instead, a cell wanting a slot sets a bit, and its place in the queue is how many bits come before its own. See `alloc.wgsl`. Deaths give slots back the same way. This costs almost nothing, and worlds repeat exactly even when bins overflow or slots run out, which the lattice engine can't do.
+- **Bins stay sorted, and a full bin always drops the same cells.** An insert carries a value down the bin with `atomicMax`, each place keeping the larger, so the result doesn't depend on order. It's the lowest slots that drop, so a full bin isn't fair between cells. Overflow has been rare: at most 3,463 cells over 2,000 ticks at 2048 wide, while that world was growing fastest.
+- **What neighbours can see is copied into the bins each tick,** so the contact pass reads memory in the order of the world and not of the slots. This is a pass the design didn't have, and it's cheap: 0.08 ms a tick at 243,000 cells.
+- **Heat in the field isn't energy.** It's a measure, in its own units, of energy already shed. The ledger counts that energy as gone when it's spent, and `heat_rate` can then be varied in a screen without creating or destroying anything. Harm takes energy from a cell and that energy is gone too.
+- **Nothing enters rock,** however hard it's pushed, as well as rock pushing on discs that overlap it. A wall of 5 squares can't be crossed by contact either, since nothing reaches over 2 squares.
+- **Constants the design left open.** My first choices made an unevolved cell lose energy at every setting: a budget big enough to matter, spread evenly by a random brain, costs more than `eat_max * (1 - locked)` brings in. The world died out. That contradicts "a lone cell lives, slowly", so the budget is now small and cheap efforts do most of what they can: `spend_share` 0.0013, `commitment` 0.0002, `eat_rate` 400. These are chosen so that the numbers `predictions.py` uses still hold (a cell at 0.004 on enzyme makes 0.05 a tick, and sheds about 0.02 of heat a tick), so its table above stands.
+
 ## Measures
 
 A body is a connected group under contact with adhesion. It's only real if it passes these, compared with the same run with adhesion off:

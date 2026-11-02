@@ -1021,3 +1021,144 @@ fn the_view_draws_a_cell_where_it_is() {
     let rim: u32 = at(40 + r_px, 40).iter().map(|v| *v as u32).sum();
     assert!(rim < mid, "rim {rim}, middle {mid}");
 }
+
+/// What's different with a rule off: a brain that wants the action gets no budget for it, and
+/// nothing happens that the rule would have done. `effect` says whether the rule did anything,
+/// so the same check run with the rule on proves the check can see it.
+fn check_off_switch(key: &'static str, action: usize, effect: fn(&mut auto_life_soft::World, u32, u32) -> bool) {
+    let run = |on: bool| {
+        let mut sets = only(&[key]);
+        sets.push(("k_push", "0"));
+        sets.push(("heat_rate", "0"));
+        sets.push((key, if on { "true" } else { "false" }));
+        let mut w = still_world(32, &sets);
+        let g = genome(&[(REST, 0), (action, 120)]);
+        let idle = genome(&[(REST, 127)]);
+        w.write_fa(10, 10, [0.0, 5.0, 0.0, 0.0]);
+        let a = w.plant(10.5, 10.5, 10.0, 0.0, 0.0, &g);
+        let b = w.plant(11.2, 10.5, 5.0, 0.0, 0.0, &idle);
+        w.step();
+        w.flush();
+        let share = {
+            let p = w.read_plans()[a as usize];
+            [p.s0, p.s1, p.s2].concat()[action]
+        };
+        (share, effect(&mut w, a, b))
+    };
+    let (share_on, did_on) = run(true);
+    assert!(share_on > 0.1 && did_on, "{key} on: share {share_on}, effect {did_on}");
+    let (share_off, did_off) = run(false);
+    assert_eq!(share_off, 0.0, "{key} off still has a share of the budget");
+    assert!(!did_off, "{key} off still does what it did");
+}
+
+#[test]
+fn every_action_has_an_off_switch() {
+    check_off_switch("thrust_on", THRUST, |w, a, _| {
+        at(w, &w.read_cells()[a as usize]).0 != 10.5
+    });
+    check_off_switch("push_on", PUSH, |w, _, b| {
+        (at(w, &w.read_cells()[b as usize]).0 - 11.2).abs() > 1e-3
+    });
+    check_off_switch("stick_on", STICK, |w, a, _| w.read_cells()[a as usize].stick > 0.0);
+    check_off_switch("bite_on", BITE, |w, _, _| w.tally().flow("bite_paid") > 0);
+    check_off_switch("give_on", GIVE, |w, _, _| w.tally().flow("give_out") > 0);
+    check_off_switch("meat_on", MEAT, |w, _, _| w.tally().flow("meat_got") > 0);
+    check_off_switch("enzyme_on", ENZYME, |w, _, _| {
+        w.read_fa().iter().any(|s| s[3] > 0)
+    });
+    check_off_switch("heat_on", HEAT, |w, _, _| w.read_fa().iter().any(|s| s[2] > 0));
+    check_off_switch("scent_on", EMIT, |w, _, _| {
+        w.read_fb().iter().any(|s| s.iter().any(|v| *v > 0))
+    });
+}
+
+#[test]
+fn voice_memory_and_splitting_have_off_switches() {
+    // Voice: the bytes for it in what neighbours see stay at zero.
+    let voiced = |on: &'static str| {
+        let mut w = still_world(32, &[("voice_on", on)]);
+        let s = w.plant(10.0, 10.0, 5.0, 0.0, 0.0, &genome(&[(REST, 127), (VOICE0, 100)]));
+        w.step();
+        w.flush();
+        (w.read_cells()[s as usize].gv >> 16) & 0xFF
+    };
+    assert_ne!(voiced("true"), 0);
+    assert_eq!(voiced("false"), 0);
+    // Memory: what's remembered doesn't reach the next thought. Unit 0 feeds itself through a
+    // recurrent weight, so with memory on it grows from tick to tick, and with it off it doesn't.
+    let remembered = |on: &'static str| {
+        let mut w = still_world(32, &[("memory_on", on)]);
+        let mut g = genome(&[(REST, 127), (GLUE0, 120)]);
+        let hh = (2 * auto_life_soft::config::IN_BLOCKS) as usize;
+        g[hh * 16] = 60;
+        let s = w.plant(10.0, 10.0, 5.0, 0.0, 0.0, &g);
+        for _ in 0..4 {
+            w.step();
+        }
+        w.flush();
+        (w.read_cells()[s as usize], w.read_mem()[s as usize * 2][0]).1
+    };
+    assert!(remembered("true") > remembered("false") + 0.01);
+    // Splitting.
+    let split = |on: &'static str| {
+        let mut w = still_world(32, &[("split_on", on)]);
+        w.plant(10.0, 10.0, 8.0, 2.5, 0.0, &genome(&[(REST, 127), (SPLIT, 50)]));
+        w.step();
+        w.flush();
+        w.alive()
+    };
+    assert_eq!(split("true"), 2);
+    assert_eq!(split("false"), 1);
+}
+
+#[test]
+fn locked_zero_and_heat_zero_remove_those_rules() {
+    // With locked at 0, enzyme does nothing for a cell.
+    let eaten = |locked: &'static str, z: f32| {
+        let mut w = quiet_world(32, &[], &[("locked", locked), ("eat_max", "10"), ("eat_rate", "20")]);
+        w.write_fa(5, 5, [30.0, 0.0, 0.0, z]);
+        let s = w.plant(5.5, 5.5, 10.0, 0.0, 0.0, &genome(&[(REST, 60), (EAT, 100)]));
+        w.step();
+        w.flush();
+        e_of(&w.read_cells()[s as usize])
+    };
+    assert_eq!(eaten("0", 0.0), eaten("0", 2.0));
+    assert!(eaten("0.9", 0.0) < eaten("0.9", 2.0));
+    // With heat_harm at 0, heat hurts nobody.
+    let mut w = still_world(32, &[("heat_harm", "0")]);
+    w.write_fa(5, 5, [0.0, 0.0, 9.0, 0.0]);
+    let s = w.plant(5.5, 5.5, 2.0, 0.0, 0.0, &genome(&[(REST, 127)]));
+    w.step();
+    w.flush();
+    close(e_of(&w.read_cells()[s as usize]), 2.0, "no harm");
+    // With rain_p at 0 and no burst, nothing lands.
+    let mut w = world_with(32, 1, &[("rain_p", "0"), ("rain_burst_ticks", "0")]);
+    for _ in 0..50 {
+        w.step();
+    }
+    w.flush();
+    assert_eq!(w.alive(), 0);
+}
+
+#[test]
+fn drifting_sun_moves_the_food_and_keeps_the_total() {
+    let totals = |drift: &'static str| {
+        let mut w = world_with(
+            64,
+            4,
+            &[("sun_drift", drift), ("rock", "false"), ("rain_p", "0"), ("rain_burst_ticks", "0"), ("food_start_ticks", "0"), ("food_cap", "1000"), ("sun", "0.05")],
+        );
+        for _ in 0..100 {
+            w.step();
+        }
+        w.flush();
+        let fa = w.read_fa();
+        let total: f64 = fa.iter().map(|s| s[0] as f64).sum();
+        (fa, total)
+    };
+    let (still, a) = totals("0");
+    let (moved, b) = totals("0.5");
+    assert!(still != moved, "drift changed nothing");
+    assert!((a - b).abs() / a < 0.02, "total food {a} against {b}");
+}

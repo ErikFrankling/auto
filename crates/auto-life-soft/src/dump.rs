@@ -222,7 +222,8 @@ impl Palette {
             }
             let t = pc * self.gain[axis];
             let t = t / (1.0 + t.abs());
-            ((0.5 + 0.5 * t) * 255.0) as u8
+            // Never far from bright, since the ground is black.
+            ((0.62 + 0.38 * t) * 255.0) as u8
         })
     }
 }

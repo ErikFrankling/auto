@@ -73,6 +73,9 @@ struct Args {
     /// When the run ends, draw every cell as a disc, coloured by genome, to this PNG.
     #[arg(long)]
     png: Option<String>,
+    /// When the run ends, print a hash of everything physical, to compare two runs.
+    #[arg(long)]
+    fingerprint: bool,
     /// Measure each pass with timestamp queries, and log where the time goes. Slower.
     #[arg(long)]
     profile: bool,
@@ -275,6 +278,9 @@ fn run(args: Args) -> Result<(), String> {
         dump::write_png(&cells, world.cfg.size, path)?;
         eprintln!("wrote {path}");
     }
+    if args.fingerprint {
+        println!("fingerprint {:016x} at tick {}", world.fingerprint(), world.tick);
+    }
     if let Some(path) = &args.save {
         world.save(path)?;
         eprintln!("saved {path}");
@@ -283,16 +289,15 @@ fn run(args: Args) -> Result<(), String> {
     Ok(())
 }
 
-/// A line of the log. Flows are per tick since the last line, in energy. With the ledger off they
+/// A line of the log. Flows are totals since the last line, in energy. With the ledger off they
 /// are estimates from one cell in 64. With it on they're exact, and so is the gap.
 fn report(world: &mut World, last: &Tally) -> Value {
     let now = world.tally();
     let stock = world.stock();
     let per_tick = 1.0 / 65536.0;
     let mut flows = Map::new();
-    let span = world.tick as f64;
     for (k, name) in ROUTES.iter().enumerate() {
-        // Totals since the world began: they're what the ledger adds up.
+        // Scaled up when only one cell in 64 was counted.
         flows.insert(
             name.to_string(),
             json!((now.flows[k] - last.flows[k]) as f64 * now.sample as f64 * per_tick),
@@ -328,6 +333,5 @@ fn report(world: &mut World, last: &Tally) -> Value {
         r["ledger_in"] = json!((now.flow("sun") + now.flow("rain")) as f64 * per_tick);
         r["ledger_out"] = json!(now.lost() as f64 * per_tick);
     }
-    let _ = span;
     r
 }

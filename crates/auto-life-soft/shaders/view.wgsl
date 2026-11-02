@@ -74,7 +74,8 @@ fn genome_colour(s: u32) -> vec3f {
         dot(V.axes[8], v0) + dot(V.axes[9], v1) + dot(V.axes[10], v2) + dot(V.axes[11], v3),
     ) * V.gain.xyz;
     let t = pc / (vec3f(1.0) + abs(pc));
-    return vec3f(0.5) + 0.5 * t;
+    // Never far from bright, since the ground is black.
+    return vec3f(0.62) + 0.38 * t;
 }
 fn cell_colour(s: u32) -> vec3f {
     let m = V.cell_mode;
@@ -90,7 +91,7 @@ fn cell_colour(s: u32) -> vec3f {
             let h = pcg(cell[s].clade ^ 0x9E3779B9u);
             return hue(unit_f(h), 0.55 + 0.45 * f32((h >> 3u) & 7u) / 7.0, 0.72 + 0.28 * f32((h >> 6u) & 7u) / 7.0);
         }
-        case 6u: { return seq(f32(cell[s].generation) / V.gen_top); }
+        case 6u: { return seq(f32(cell[s].gen) / V.gen_top); }
         case 7u: { return seq(cell[s].stick); }
         case 8u: { return seq(f32(cell[s].womb) * E_INV / 5.0); }
         case 9u: { return seq((log(max(cell[s].mu, 1e-4)) + 7.0) / 6.5); }

@@ -1757,3 +1757,47 @@ impl World {
         out
     }
 }
+
+impl World {
+    /// Everything physical, as a hash, so two runs can be compared.
+    pub fn fingerprint(&mut self) -> u64 {
+        self.flush();
+        let mut h = 0xcbf29ce484222325u64;
+        let mut mix = |v: u32| {
+            h = (h ^ v as u64).wrapping_mul(0x100000001b3);
+        };
+        for c in self.read_cells() {
+            if c.flags & F_ALIVE == 0 {
+                continue;
+            }
+            for v in bytemuck::cast_slice::<Cell, u32>(&[c]) {
+                mix(*v);
+            }
+        }
+        for layer in [self.read_fa(), self.read_fb()] {
+            for s in layer {
+                for v in s {
+                    mix(v as u32);
+                }
+            }
+        }
+        for v in self.read_sketches() {
+            for k in v {
+                mix(k);
+            }
+        }
+        h
+    }
+}
+
+/// How many bytes of buffers a saved world of this shape holds, in file order.
+pub fn saved_bytes(cfg: &Config) -> u64 {
+    let squares = cfg.size as u64 * cfg.size as u64;
+    let slots = cfg.slots as u64;
+    let blocks = cfg.blocks() as u64;
+    squares * (4 + 16 + 16)
+        + slots * (CELL_BYTES + PLAN_BYTES + SENSE_BYTES + SKETCH_BYTES + cfg.hidden_rows as u64 * 16 + blocks * 16)
+        + cfg.slots.next_power_of_two() as u64 * 4
+        + CTR_WORDS * 4
+        + 16 * 4
+}
