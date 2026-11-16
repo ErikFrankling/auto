@@ -17,7 +17,7 @@ gather enough of it split, and cells that run out die. Colour is the genome, so 
 is one family.
 
 <p align="center">
-  <img src="media/worlds.jpg" alt="16 worlds with different seeds">
+  <img src="media/worlds.jpg" alt="16 worlds from the screen">
 </p>
 
 16 of the 384 worlds from the first screen. The results, with maps and videos, are
